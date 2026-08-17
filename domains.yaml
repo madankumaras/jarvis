@@ -1,0 +1,20 @@
+domains:
+  mcsl:
+    path: /Users/madan/Documents/MCSLDomainExpert
+    python: /Users/madan/Documents/MCSLDomainExpert/.venv/bin/python
+    socket: /tmp/jarvis-mcsl.sock
+    aliases: [mcsl, muscle, multi carrier]
+    release_pattern: '^SL MCSL (\d+):'
+    release_token: MCSL
+  fedex:
+    path: /Users/madan/Documents/Fed-Ex-automation/FedexDomainExpert
+    python: /Users/madan/Documents/Fed-Ex-automation/FedexDomainExpert/.venv/bin/python
+    socket: /tmp/jarvis-fedex.sock
+    aliases: [fedex, fed ex]
+    release_pattern: '^SL v([\d.]+) FedexApp'
+  aupost:
+    path: /Users/madan/Documents/AU_Post_DomainExpert/AUPostDomainExpert
+    python: /Users/madan/Documents/AU_Post_DomainExpert/AUPostDomainExpert/.venv/bin/python
+    socket: /tmp/jarvis-aupost.sock
+    aliases: [au post, australia post, aupost]
+    release_pattern: '^SL AuPost v([\d.]+):'
