@@ -460,3 +460,19 @@ def test_the_acknowledgement_names_no_mechanism():
     said = _acknowledge("go through card ZI-687").lower()
     for banned in ("claude", "tier", "worker", "subprocess"):
         assert banned not in said
+
+
+def test_an_expired_session_is_reported_not_summarised():
+    """The error must not be read back as an answer -- doing so produced a
+    spoken "what do you want to do?" that the mic heard and acted on."""
+    j = _jarvis_with_fakes("create a store")
+    with patch("jarvis.daemon.speak"), patch("jarvis.daemon.time.sleep"):
+        j.handle_utterance(np.zeros(16000, dtype=np.float32), _FakeCapture())
+        callback = j.tier3.start.call_args[0][1]
+        with patch.object(j, "_say") as said, patch.object(j, "_summarise") as summarised:
+            callback("Failed to authenticate: OAuth session expired and could not be refreshed")
+    spoken = said.call_args[0][0]
+    assert "sign-in has expired" in spoken.speech
+    assert "claude login" in spoken.speech
+    assert spoken.ok is False
+    summarised.assert_not_called(), "must not summarise an auth error into an answer"

@@ -305,7 +305,12 @@ INTENTS: list[Intent] = [
             # the whole utterance rather than captured twice: repeating
             # _CARD_REF would redefine its named groups, which re rejects.
             rf"|\b(?!MCSL\b)[A-Z]{{2,6}}-\d{{1,5}}\b.{{0,40}}?\b(?:issue|problem|"
-            rf"status|about|details?|summary|what'?s?\s+wrong|happening)\b",
+            rf"status|about|details?|summary|what'?s?\s+wrong|happening)\b"
+            # A bare mention is a question about that card. Real transcripts:
+            # "in ZI-667.", "ZI-662". Without this they fell through and
+            # started an agentic job on a two-word prompt, which is a wasted
+            # minute and a confusing answer.
+            rf"|^\W*(?:in\s+|about\s+)?(?!MCSL\b)[A-Z]{{2,6}}-\d{{1,5}}\W*$",
             re.I,
         ),
         extract=_card_from_text,

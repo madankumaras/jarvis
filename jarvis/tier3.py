@@ -11,12 +11,25 @@ Two rules from the spec, both load-bearing:
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import threading
 import traceback
 from typing import Callable
 
 TIMEOUT_SECONDS = 600  # 10 minutes, per the spec
+
+# Seen live: the CLI's OAuth session expired and every job came back with
+# "Failed to authenticate: OAuth session expired and could not be refreshed".
+# That text was then summarised and spoken as though it were an answer.
+_AUTH_FAILED = re.compile(
+    r"oauth session expired|failed to authenticate|not logged in|please (?:run )?/?login",
+    re.I,
+)
+
+
+def looks_like_auth_failure(output: str) -> bool:
+    return bool(_AUTH_FAILED.search(output or ""))
 
 # `claude -p` is non-interactive: it cannot show a permission prompt, so
 # anything needing approval simply stalls and reports back asking for it.

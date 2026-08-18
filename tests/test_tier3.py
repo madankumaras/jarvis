@@ -125,3 +125,36 @@ def test_permission_args_are_passed_to_claude(monkeypatch, tmp_path):
     assert "--allowedTools" in seen["argv"]
     assert seen["argv"][-2] == "-p"
     assert seen["argv"][-1] == "create a store"
+
+
+# --- an expired session is not an answer ---
+
+def test_an_expired_oauth_session_is_recognised():
+    """Seen live: every job returned "Failed to authenticate: OAuth session
+    expired", which was then summarised and spoken as though it were an answer
+    -- and the mic heard it and started another job."""
+    from jarvis.tier3 import looks_like_auth_failure
+
+    assert looks_like_auth_failure(
+        "Failed to authenticate: OAuth session expired and could not be refreshed"
+    )
+
+
+@pytest.mark.parametrize("text", [
+    "not logged in", "please run /login", "Failed to authenticate",
+])
+def test_other_sign_in_failures_are_recognised(text):
+    from jarvis.tier3 import looks_like_auth_failure
+
+    assert looks_like_auth_failure(text)
+
+
+@pytest.mark.parametrize("text", [
+    "The store is ready with 12 products.",
+    "ZI-687 is verified and merged.",
+    "",
+])
+def test_a_real_answer_is_not_mistaken_for_an_auth_failure(text):
+    from jarvis.tier3 import looks_like_auth_failure
+
+    assert looks_like_auth_failure(text) is False

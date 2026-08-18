@@ -318,6 +318,20 @@ class Jarvis:
             head = " ".join(output.split())[:200] or "no output"
             print(f"\n  [job finished] {head}", flush=True)
             BUS.publish("job", status="finished", what=question)
+
+            # An expired session is not an answer. Summarising it produced a
+            # spoken "your session has expired, what do you want to do?", which
+            # the mic then heard and turned into another request.
+            from jarvis.tier3 import looks_like_auth_failure
+
+            if looks_like_auth_failure(output):
+                self._say(Response(
+                    speech="I can't run that — your Claude sign-in has expired. "
+                           "Run claude login in a terminal and ask me again.",
+                    detail=output[:600], tier=3, ok=False,
+                ))
+                return
+
             spoken = self._summarise(output, question)
             self._say(Response(speech=spoken, detail=output[:600], tier=3))
 

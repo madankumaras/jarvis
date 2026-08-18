@@ -143,8 +143,17 @@ class Capture:
     """Handed to the wake callback so it can speak, then record, from the one
     live stream. Without drain(), Jarvis records its own greeting."""
 
-    def __init__(self, audio_queue: "queue.Queue[np.ndarray]") -> None:
+    def __init__(
+        self,
+        audio_queue: "queue.Queue[np.ndarray]",
+        muted: threading.Event | None = None,
+    ) -> None:
         self._q = audio_queue
+        # Muting stops the wake detector, but a record() already in flight kept
+        # collecting -- so a tier-3 summary spoken from a background thread was
+        # captured and transcribed as the user's next command, which then
+        # started another job. Observed as a genuine feedback loop.
+        self._muted = muted or threading.Event()
 
     def drain(self) -> None:
         """Discard everything buffered so far — e.g. the greeting we just spoke."""
@@ -155,13 +164,25 @@ class Capture:
                 return
 
     def record(self, seconds: float) -> np.ndarray:
+        """Collect `seconds` of room audio.
+
+        Nothing spoken by Jarvis can appear here: while muted the callback does
+        not enqueue at all, so the queue only ever holds room audio. Bounded by
+        wall clock so a long mute cannot wedge the turn.
+        """
         need = int(seconds * SAMPLE_RATE)
+        deadline = time.monotonic() + seconds * 4 + 10
         parts: list[np.ndarray] = []
         got = 0
-        while got < need:
-            chunk = self._q.get()
+        while got < need and time.monotonic() < deadline:
+            try:
+                chunk = self._q.get(timeout=1.0)
+            except queue.Empty:
+                continue
             parts.append(chunk)
             got += len(chunk)
+        if not parts:
+            return np.zeros(0, dtype=np.float32)
         return np.concatenate(parts)[:need]
 
 
@@ -285,9 +306,18 @@ class WakeListener:
 
         self._ensure_wakeword()
         audio_queue: "queue.Queue[np.ndarray]" = queue.Queue()
-        capture = Capture(audio_queue)
+        capture = Capture(audio_queue, muted=self.muted)
 
         def callback(indata, frames, time_info, status):
+            # Drop everything while Jarvis is speaking, at the source.
+            #
+            # Guarding only the detector was not enough: audio queued during a
+            # tier-3 summary was read by the next record() and transcribed as
+            # the user's command, which started another job. A real feedback
+            # loop, seen live. Not enqueueing means neither the detector nor a
+            # capture can ever see our own voice.
+            if self.muted.is_set():
+                return
             # Enqueue only. Anything slower belongs on the main thread.
             audio_queue.put(indata[:, 0].copy())
 

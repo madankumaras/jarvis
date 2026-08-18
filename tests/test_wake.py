@@ -476,3 +476,88 @@ def test_unmuting_restores_waking(monkeypatch):
 
     wl = WakeListener(on_wake, mode="clap", settle=0)
     assert isinstance(_run_with_timeout(wl, seconds=3.0), SystemExit)
+
+
+# --- Jarvis must not record its own voice mid-capture ---
+
+def test_our_own_voice_never_reaches_the_queue(monkeypatch):
+    """Regression, seen live: a tier-3 summary spoken from a background thread
+    was queued during the mute, read by the next record(), transcribed as the
+    user's command, and started another job.
+
+    Guarding the read side was not enough -- the audio was already queued. The
+    callback must not enqueue while muted.
+    """
+    import sys
+    import threading
+    import types
+
+    loud = np.full(1280, 0.9, dtype=np.float32)
+    quiet = np.full(1280, 0.01, dtype=np.float32)
+    captured = {}
+
+    class _Stream:
+        def __init__(self, chunks, callback):
+            self.chunks, self.callback = chunks, callback
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *e):
+            return False
+
+    def fake_stream(**kw):
+        captured["cb"] = kw["callback"]
+        return _Stream([], kw["callback"])
+
+    fake_sd = types.ModuleType("sounddevice")
+    fake_sd.InputStream = fake_stream
+    monkeypatch.setitem(sys.modules, "sounddevice", fake_sd)
+
+    wl = WakeListener(lambda c, s=None: None, mode="clap", settle=0)
+    q: "_queue.Queue" = _queue.Queue()
+
+    # Reproduce run()'s callback with this listener's mute flag.
+    def cb(indata, frames, t, status):
+        if wl.muted.is_set():
+            return
+        q.put(indata[:, 0].copy())
+
+    wl.muted.set()
+    for _ in range(10):
+        cb(loud.reshape(-1, 1), 1280, None, None)      # Jarvis speaking
+    assert q.qsize() == 0, "our own voice was queued"
+
+    wl.muted.clear()
+    for _ in range(20):
+        cb(quiet.reshape(-1, 1), 1280, None, None)     # the room
+    assert q.qsize() == 20
+
+    audio = Capture(q).record(0.5)
+    assert float(np.max(np.abs(audio))) < 0.5
+
+
+def test_record_returns_the_full_requested_window():
+    q = _queue.Queue()
+    for _ in range(40):
+        q.put(np.full(1280, 0.02, dtype=np.float32))
+    from jarvis.ears.stt import SAMPLE_RATE
+
+    assert len(Capture(q).record(0.5)) == int(0.5 * SAMPLE_RATE)
+
+
+def test_record_does_not_block_forever_on_a_silent_queue():
+    """A mute that never clears starves the queue; the turn must still end."""
+    import time as _t
+
+    t0 = _t.monotonic()
+    out = Capture(_queue.Queue()).record(0.1)
+    assert _t.monotonic() - t0 < 15
+    assert out.size == 0
+
+
+def test_capture_without_a_mute_event_still_works():
+    q = _queue.Queue()
+    for _ in range(20):
+        q.put(np.full(1280, 0.03, dtype=np.float32))
+    assert Capture(q).record(0.3).size > 0

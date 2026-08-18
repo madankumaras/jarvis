@@ -24,8 +24,15 @@ _SPEAKABLE = [
     (re.compile(r"\u2192|->"), " to "),              # arrows
     (re.compile(r"[\u2018\u2019]"), "'"),            # smart quotes
     (re.compile(r"[\u201c\u201d]"), ""),
+    # An embedded image is not worth speaking at all. Trello comments are full
+    # of "![image.webp](https://trello.com/1/cards/.../download/image.webp)",
+    # which was read out as bracket-and-filename noise.
+    (re.compile(r"!\[[^\]]*\]\s*[\(\[][^\)\]]*[\)\]]"), " an image "),
+    (re.compile(r"!\[[^\]]*\]"), " an image "),
     # Before the markdown rule: that strips the "#" this one needs.
     (re.compile(r"\[#(\d+)\]?"), r" ticket \1"),     # "[#399431]" reads as noise
+    (re.compile(r"\[([^\]]{1,60})\]\s*[\(\[][^\)\]]*[\)\]]"), r" \1 "),  # [text](url)
+    (re.compile(r"[\[\]]+"), " "),
     (re.compile(r"[*_`#>|]+"), " "),                 # markdown scaffolding
     (re.compile(r"https?://\S+"), " a link "),
     # Anything left outside basic Latin: emoji, pictographs, box drawing.
