@@ -215,15 +215,18 @@ def my_release_cards(release: str) -> dict[str, Any]:
     are assigned to me" needs both the scope and the filter honoured.
     """
     client = _trello()
+    releases = _release_lists(client)
     wanted = re.sub(r"[^0-9.]", "", release)
-    if not wanted:
-        return {"speech": f"Didn't recognise the release {release}.", "detail": ""}
 
     target = None
-    for lst in _release_lists(client):
-        if wanted in lst.name.replace(" ", ""):
-            target = lst
-            break
+    if not wanted:
+        # No release named: the newest one is what "my tickets" means.
+        target = releases[0] if releases else None
+    else:
+        for lst in releases:
+            if wanted in lst.name.replace(" ", ""):
+                target = lst
+                break
     if target is None:
         return {"speech": f"No release list matching {release}.", "detail": ""}
 
@@ -238,12 +241,16 @@ def my_release_cards(release: str) -> dict[str, Any]:
         return {
             "speech": f"Nothing in {target.name} is assigned to you.",
             "detail": target.name,
+            "ids": [],
+            "release": target.name,
         }
 
     label = "ticket" if len(mine) == 1 else "tickets"
     return {
         "speech": f"{len(mine)} {label} assigned to you in {target.name}: " + ", ".join(mine),
         "detail": "\n".join(mine),
+        "ids": mine,
+        "release": target.name,
     }
 
 
@@ -257,15 +264,30 @@ def my_tasks() -> dict[str, Any]:
 
     mine = []
     for lst in _release_lists(client)[:3]:
-        for raw in _raw_cards(client, lst.id):
+        for raw in _raw_cards(client, lst.id, fields="name,idMembers"):
             if me in (raw.get("idMembers") or []):
-                mine.append((_short(raw.get("name", "")), lst.name))
+                name = raw.get("name", "")
+                after = name.split("\u2014", 1)[-1] if "\u2014" in name else name
+                mine.append({
+                    "id": _short(name),
+                    "release": lst.name,
+                    "title": re.sub(r"\s*\[#\d+\]\s*$", "", after).strip(),
+                })
 
     if not mine:
-        return {"speech": "Nothing assigned to you in the current releases.", "detail": ""}
+        return {
+            "speech": "Nothing assigned to you in the current releases.",
+            "detail": "", "items": [],
+        }
 
-    speech = f"You have {len(mine)} cards. " + ", ".join(f"{n} in {l}" for n, l in mine[:5])
-    return {"speech": speech, "detail": "\n".join(f"{n} — {l}" for n, l in mine)}
+    speech = f"You have {len(mine)} cards. " + ", ".join(
+        f"{m['id']} in {m['release']}" for m in mine[:5]
+    )
+    return {
+        "speech": speech,
+        "detail": "\n".join(f"{m['id']} \u2014 {m['release']}" for m in mine),
+        "items": mine,
+    }
 
 
 def dev_status(query: str) -> dict[str, Any]:

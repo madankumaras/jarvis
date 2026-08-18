@@ -78,20 +78,28 @@ class Jarvis:
         """Refresh the right-hand rail. Best effort: a dashboard that cannot be
         populated is not a reason to interrupt a turn."""
         try:
-            tickets = []
-            raw = self.worker.call("release_card_ids")
-            release = raw.get("release", "")
-            ids = raw.get("ids", [])
-            titles = raw.get("titles", {})
-            for zi in ids[:8]:
-                tickets.append({"id": zi, "title": titles.get(zi, "")})
+            everything = self.worker.call("release_card_ids")
+            release = everything.get("release", "")
+            all_ids = everything.get("ids", [])
+            titles = everything.get("titles", {})
+
+            # Cards actually assigned to you, across the current releases --
+            # the newest release often has none of yours, and a rail reading
+            # "0" is accurate but useless. Labelling the release total as
+            # "assigned to you" would be worse: confidently wrong.
+            items = self.worker.call("my_tasks").get("items", [])
+            in_newest = [m for m in items if m.get("release") == release]
+
             BUS.publish(
                 "context",
                 release=release,
-                mine=f"{len(ids)} in release",
+                mine=f"{len(in_newest)} of {len(all_ids)} · {len(items)} total",
                 issues=len(self.vocab.zi_ids),
                 reminders=len(self.store.due_tasks()),
-                tickets=tickets,
+                tickets=[
+                    {"id": m["id"], "title": m.get("title") or titles.get(m["id"], "")}
+                    for m in items[:10]
+                ],
             )
         except Exception:
             pass
