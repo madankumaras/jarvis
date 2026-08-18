@@ -48,9 +48,10 @@ JARVIS_VOICE=Rishi JARVIS_VOICE_RATE=170 .venv/bin/python -m jarvis.daemon
 Eight usable English voices are installed by default. `Rishi`, `Aman` and
 `Tara` are Indian English and are listed first — a voice whose accent matches
 the person speaking to it pronounces names and place words correctly, which
-matters more than it sounds like it should. `Daniel` (en_GB) is the default;
-`Samantha` (en_US), `Karen` (en_AU), `Moira` (en_IE) and `Tessa` (en_ZA) are
-also available. Rate is words per minute; 190 is the default, 165 is calmer.
+matters more than it sounds like it should. **`Tara` (en_IN) is the default.**
+`Daniel` (en_GB), `Samantha` (en_US), `Karen` (en_AU), `Moira` (en_IE) and
+`Tessa` (en_ZA) are also available. Rate is words per minute; 190 is the
+default, 165 is calmer.
 
 No microphone handy? The same pipeline works typed:
 

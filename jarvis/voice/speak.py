@@ -7,10 +7,10 @@ import subprocess
 from jarvis.types import Response
 
 # Any installed macOS voice: `.venv/bin/python -m jarvis.voice.voices` lists
-# the usable ones and reads a sample in each. Indian English voices (Rishi,
-# Aman, Tara) tend to sit better than the en_GB default for Indian-accented
-# input, because the pronunciation of names and place words matches.
-VOICE = os.environ.get("JARVIS_VOICE", "Daniel")
+# the usable ones and reads a sample in each. Tara (en_IN) is the default:
+# Jarvis reads out carrier names, colleague names and ticket titles, and an
+# Indian English voice pronounces them correctly where en_GB mangles them.
+VOICE = os.environ.get("JARVIS_VOICE", "Tara")
 RATE = int(os.environ.get("JARVIS_VOICE_RATE", "190"))
 
 
