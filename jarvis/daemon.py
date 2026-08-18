@@ -7,6 +7,7 @@ import time
 import numpy as np
 
 from jarvis.dash.bus import BUS
+from jarvis.flow import driver as flow_driver
 from jarvis.dash.server import Dashboard
 from jarvis.ears.stt import Transcriber
 from jarvis.ears.wake import SETTLE_SECONDS, Capture, WakeListener
@@ -341,6 +342,21 @@ class Jarvis:
                 return
 
             spoken = self._summarise(output, question)
+
+            # A running flow continues from here: record the result, then say
+            # whatever comes next -- usually the offer for the following step.
+            # Without this the flow stalls silently after every step.
+            if self.conversation.in_flow():
+                self.conversation.flow.record(output)
+                nxt = flow_driver.advance(self.conversation.flow)
+                self._say(Response(
+                    speech=f"{spoken} {nxt.speech}".strip(),
+                    detail=output[:600], tier=3,
+                ))
+                if nxt.tier == 3 and not self.conversation.flow.finished:
+                    self._run_tier3(nxt)
+                return
+
             self._say(Response(speech=spoken, detail=output[:600], tier=3))
 
         if not self.tier3.start(question, done, context=self._tier3_context()):
@@ -392,6 +408,8 @@ class Jarvis:
             out = self.worker.call("summarise", text=output, question=question)
             said = (out or {}).get("speech", "").strip()
             if said:
+                if self.conversation.in_flow():
+                    return said        # the flow asks its own next question
                 return f"{said} What do you want to do?"
         except Exception:
             pass

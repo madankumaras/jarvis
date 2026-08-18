@@ -8,6 +8,9 @@ from typing import Protocol
 from jarvis.correct.snap import correct
 from jarvis.router.confirm import PendingAction
 from jarvis.router.conversation import Conversation, SlotFill, is_closing
+from jarvis.flow import driver as flow_driver
+from jarvis.flow.engine import Flow
+from jarvis.flow.spec import load as load_workflows
 from jarvis.router.intents import match
 from jarvis.types import Response, RpcError, Vocab
 
@@ -56,7 +59,16 @@ def _handle(
 
     if conversation is not None:
         if is_closing(text):
+            if conversation.in_flow():
+                conversation.flow.decline()
             return Response(speech="Ok boss.", ends=True)
+
+        # A running flow owns the turn: the next thing said is an answer to its
+        # question or its offer, not a fresh command.
+        if conversation.in_flow():
+            return flow_driver.reply(
+                conversation.flow, text, _flow_context(conversation, domain)
+            )
 
         # An answer to a question Jarvis asked takes precedence over routing:
         # "Ashok" is not a command, it is the reply to "who should I send it to?"
@@ -70,6 +82,19 @@ def _handle(
 
         if interpret(text) in {"yes", "no"}:
             return Response(speech="Ok.", ok=True)
+
+        # Workflow triggers are matched on the raw utterance, before reference
+        # resolution and before the dangling-reference check. Both would
+        # otherwise defeat them: "prep that card" is rewritten to "prep ZI-686"
+        # when a card is known, and asks "which card?" when none is -- either
+        # way the trigger phrase is gone before it can match. The flow asks for
+        # the card itself, which is the better question anyway.
+        workflow = _catalogue().match(text)
+        if workflow is not None:
+            conversation.flow = Flow(workflow=workflow)
+            return flow_driver.start(
+                conversation.flow, _flow_context(conversation, domain)
+            )
 
         if conversation.unresolved_reference(text):
             return _which_card(worker)
@@ -162,6 +187,32 @@ def _handle(
         detail=payload.get("detail", ""),
         tier=1,
     )
+
+
+_CATALOGUE = None
+
+
+def _catalogue():
+    """Load workflows.yaml once. A malformed file disables flows rather than
+    breaking every turn."""
+    global _CATALOGUE
+    if _CATALOGUE is None:
+        try:
+            _CATALOGUE = load_workflows()
+        except Exception:
+            from jarvis.flow.spec import Catalogue
+
+            _CATALOGUE = Catalogue()
+    return _CATALOGUE
+
+
+def _flow_context(conversation: Conversation, domain: str) -> dict:
+    return {
+        "card": conversation.last_card,
+        "person": conversation.last_person,
+        "release": conversation.last_release,
+        "domain": domain,
+    }
 
 
 def _which_card(worker: Worker) -> Response:

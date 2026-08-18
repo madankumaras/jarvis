@@ -139,6 +139,50 @@ to you and waits for an explicit "ok". Anything that is not a bare affirmative
 counts as no: "ok so actually make it the GLS store" is a correction, not
 consent. Reminders and notes are local and need no confirmation.
 
+## Workflows
+
+Multi-step flows live in `workflows.yaml`. Add one there and Jarvis can run it
+with no code change:
+
+```yaml
+  - name: new_build
+    triggers: [new build deployed, build deployed]
+    steps:
+      - say: Ok boss, pulling dev and wiki then re-indexing.
+        kind: agent
+        request: Using the mcsl-rag-sync skill, pull dev and wiki, re-index.
+      - offer: Indexing done. Shall I write the AC for {card}?
+        needs: [card]
+        kind: agent
+        request: Using mcsl-ac-writer-reviewer, write the AC for {card}.
+```
+
+How it runs:
+
+```
+you>    hey jarvis, new build deployed
+jarvis> Ok boss, pulling dev and wiki then re-indexing. Give me a few minutes.
+jarvis> Indexing done. Shall I write the AC for ZI-667?
+you>    yes
+jarvis> ...ten scenarios. Shall I write the test cases as well?
+you>    no
+jarvis> Ok boss, stopping there.
+```
+
+Three rules the engine enforces:
+
+**Every step after the first waits for a yes.** A misheard workflow name must
+not commit you to six actions unattended.
+
+**Declining ends the flow, it does not skip ahead.** Refusing "shall I write the
+AC?" means stop — the test-case step depends on that output.
+
+**A missing `{placeholder}` is asked for, not spoken literally.** `{card}` is
+seeded from the conversation when you have already named one, and asked for when
+you have not.
+
+Three ship by default: `new_build`, `prep_card`, `toggle_request`.
+
 ## Labels are the workflow
 
 The board carries 50 labels. These decide whether a card needs testing, and

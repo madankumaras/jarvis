@@ -77,6 +77,9 @@ class Conversation:
     last_release: str = ""
     last_person: str = ""
     slots: SlotFill | None = None
+    # A named multi-step flow in progress, if any. Typed loosely to keep this
+    # module free of flow imports.
+    flow: Any = None
 
     def remember(self, intent_name: str, params: dict) -> None:
         if params.get("card_id"):
@@ -88,6 +91,9 @@ class Conversation:
 
     def expects_answer(self) -> bool:
         return self.slots is not None and not self.slots.complete
+
+    def in_flow(self) -> bool:
+        return self.flow is not None and not getattr(self.flow, "finished", True)
 
     def resolve(self, text: str) -> str:
         """Substitute remembered entities for spoken references.

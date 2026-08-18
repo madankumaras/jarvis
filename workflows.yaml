@@ -1,0 +1,101 @@
+# Named multi-step flows. Add one here and Jarvis can run it — no code change.
+#
+# Each step:
+#   say      spoken before the step runs (optional)
+#   offer    spoken INSTEAD of running, waiting for a yes. Every step after the
+#            first should have one: a misheard workflow name must not commit you
+#            to six things unattended.
+#   kind     agent  -> handed to the agentic path, with repo/release/card context
+#            worker -> a direct worker call, sub-second
+#   request  the agent prompt, or the worker method for kind: worker
+#   needs    slots that must be filled before the step can run. Jarvis asks for
+#            each one it cannot resolve from the conversation.
+#
+# {placeholders} are filled from conversation state and from answered slots.
+
+workflows:
+  - name: new_build
+    triggers:
+      - new build deployed
+      - new build is deployed
+      - build deployed
+      - build is deployed
+      - pull the latest code
+      - sync the code
+    steps:
+      - say: Ok boss, pulling dev and wiki then re-indexing. Give me a few minutes.
+        kind: agent
+        request: >
+          Using the mcsl-rag-sync skill, pull the latest dev code and the wiki,
+          then re-index the RAG store. Report in one or two sentences what
+          changed and how many documents were indexed.
+
+      - offer: Indexing done. Shall I write the AC for {card}?
+        kind: agent
+        needs: [card]
+        request: >
+          Using the mcsl-ac-writer-reviewer skill, write the user story and
+          acceptance criteria for {card}. Follow any linked SL/StoryLab card
+          before writing. Report how many scenarios you produced.
+
+      - offer: Shall I write the test cases for {card} as well?
+        kind: agent
+        request: >
+          Using the mcsl-dashboard-tc-publisher skill, write the test cases for
+          {card} from the AC just generated. Do not publish anywhere yet.
+          Report how many cases you produced.
+
+  - name: prep_card
+    triggers:
+      - prepare that card
+      - prep that card
+      - get that card ready
+      - prepare {card}
+    steps:
+      - say: Ok boss, reading {card} now.
+        kind: worker
+        needs: [card]
+        request: card_status
+
+      - offer: Shall I write the AC for {card}?
+        kind: agent
+        request: >
+          Using the mcsl-ac-writer-reviewer skill, write the user story and
+          acceptance criteria for {card}. Report how many scenarios.
+
+      - offer: Shall I write the test cases too?
+        kind: agent
+        request: >
+          Using the mcsl-dashboard-tc-publisher skill, write the test cases for
+          {card}. Do not publish. Report how many cases.
+
+  - name: toggle_request
+    triggers:
+      - check the toggles
+      - what toggles are needed
+      - toggle request
+      - do we need any toggles
+    steps:
+      - say: Ok boss, checking what toggles {card} needs.
+        kind: agent
+        needs: [card]
+        request: >
+          Read {card} and its comments. List any feature toggles this card
+          needs enabled before QA can start, using the toggle detection in
+          this repo. If none are needed, say so plainly.
+
+      - offer: Which store are we testing on?
+        kind: agent
+        needs: [store]
+        request: >
+          For store "{store}", capture the live account UUID and the current
+          state of the toggles needed by {card}, using this repo's toggle
+          state tooling. Report the account UUID and which toggles are
+          missing, in one or two sentences.
+
+      - offer: Shall I send Ashok the enable request for {store}?
+        kind: agent
+        request: >
+          Send Ashok the toggle enablement request for store "{store}" and
+          card {card}, using the mcsl-slack-operator skill and the account
+          UUID captured above. Report exactly what was sent.
