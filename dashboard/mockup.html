@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jarvis — HUD mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --void:#03070f; --deep:#060d1a; --panel:rgba(10,22,42,.62);
+  --line:rgba(80,180,255,.16); --line-hot:rgba(80,200,255,.45);
+  --ink:#cfe8ff; --ink-dim:#5d7fa6; --ink-faint:#33506e;
+  --cy:#3fd0ff; --cy-hot:#8ceaff;
+  --idle:#2b7fa8; --listen:#3ee08f; --think:#ffb038; --speak:#a78bfa; --alert:#ff5d6c;
+  --state:var(--idle);
+  --mono:'IBM Plex Mono',ui-monospace,monospace;
+  --disp:'Chakra Petch',system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--void); color:var(--ink); font-family:var(--disp);
+  overflow:hidden; letter-spacing:.02em;
+  background-image:
+    radial-gradient(1200px 700px at 50% 42%, rgba(20,80,140,.30), transparent 68%),
+    radial-gradient(900px 600px at 8% 100%, rgba(10,60,110,.22), transparent 70%),
+    linear-gradient(180deg,#03070f,#020509);
+}
+/* atmosphere: grid, scanlines, grain */
+body::before{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+  background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+  background-size:64px 64px;
+  mask-image:radial-gradient(circle at 50% 45%,#000 20%,transparent 78%);
+  opacity:.5;
+}
+body::after{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:60;
+  background:repeating-linear-gradient(180deg,rgba(255,255,255,.028) 0 1px,transparent 1px 3px);
+  mix-blend-mode:overlay;
+}
+.grain{position:fixed;inset:-50%;z-index:59;pointer-events:none;opacity:.05;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+  animation:grain 7s steps(6) infinite}
+@keyframes grain{0%{transform:translate(0,0)}20%{transform:translate(-3%,2%)}40%{transform:translate(2%,-3%)}60%{transform:translate(-2%,-2%)}80%{transform:translate(3%,1%)}100%{transform:translate(0,0)}}
+
+.shell{position:relative;z-index:10;height:100%;display:grid;
+  grid-template-columns:340px 1fr 330px; grid-template-rows:46px 1fr 132px; gap:14px; padding:14px}
+
+/* ---------- chrome ---------- */
+.bar{grid-column:1/-1;display:flex;align-items:center;gap:18px;
+  border:1px solid var(--line);background:var(--panel);backdrop-filter:blur(10px);
+  padding:0 16px;clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,14px 100%,0 calc(100% - 14px))}
+.brand{font-weight:700;font-size:15px;letter-spacing:.34em;color:var(--cy-hot);text-shadow:0 0 18px rgba(63,208,255,.5)}
+.bar .sep{width:1px;height:18px;background:var(--line-hot)}
+.chip{font-family:var(--mono);font-size:10.5px;color:var(--ink-dim);text-transform:uppercase;letter-spacing:.16em}
+.chip b{color:var(--ink);font-weight:500}
+.bar .right{margin-left:auto;display:flex;gap:16px;align-items:center}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--state);box-shadow:0 0 12px var(--state);
+  animation:beat 2.2s ease-in-out infinite}
+@keyframes beat{50%{opacity:.35}}
+
+.panel{border:1px solid var(--line);background:var(--panel);backdrop-filter:blur(10px);
+  position:relative;overflow:hidden;
+  clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px))}
+.panel > h2{font-family:var(--mono);font-size:10px;letter-spacing:.24em;text-transform:uppercase;
+  color:var(--ink-faint);padding:12px 14px 8px;display:flex;justify-content:space-between;align-items:center}
+.panel > h2::after{content:'';flex:1;height:1px;background:var(--line);margin-left:12px}
+.body{padding:0 14px 14px;overflow-y:auto;height:calc(100% - 34px)}
+.body::-webkit-scrollbar{width:3px}.body::-webkit-scrollbar-thumb{background:var(--line-hot)}
+
+/* ---------- centre: the reactor ---------- */
+.core{display:grid;place-items:center;position:relative;border:1px solid var(--line);
+  background:radial-gradient(circle at 50% 46%,rgba(20,90,150,.20),transparent 62%),var(--panel);
+  clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px))}
+.reactor{position:relative;width:min(46vh,430px);aspect-ratio:1}
+.reactor svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.ring-bg{fill:none;stroke:rgba(80,180,255,.10);stroke-width:1}
+.ring-tick{stroke:rgba(80,180,255,.30);stroke-width:1}
+.spin-slow{animation:spin 46s linear infinite;transform-origin:50% 50%}
+.spin-rev{animation:spin 30s linear infinite reverse;transform-origin:50% 50%}
+@keyframes spin{to{transform:rotate(360deg)}}
+.arc{fill:none;stroke:var(--state);stroke-width:2;stroke-linecap:round;
+  filter:drop-shadow(0 0 8px var(--state));transition:stroke .5s}
+#bars line{stroke:var(--state);stroke-width:2.5;stroke-linecap:round;transition:stroke .5s}
+.halo{position:absolute;inset:14%;border-radius:50%;
+  background:radial-gradient(circle,color-mix(in srgb,var(--state) 34%,transparent),transparent 66%);
+  filter:blur(22px);transition:background .5s}
+.readout{position:absolute;inset:0;display:grid;place-content:center;text-align:center;gap:6px}
+.state-name{font-family:var(--mono);font-size:11px;letter-spacing:.4em;text-transform:uppercase;color:var(--state);transition:color .5s}
+.state-line{font-size:19px;font-weight:500;max-width:15ch;line-height:1.3;color:var(--ink)}
+.level{font-family:var(--mono);font-size:10px;color:var(--ink-faint);letter-spacing:.14em}
+
+/* ---------- transcript ---------- */
+.turn{padding:10px 0;border-bottom:1px dashed rgba(80,180,255,.10);animation:rise .5s cubic-bezier(.2,.9,.2,1) both}
+@keyframes rise{from{opacity:0;transform:translateY(9px)}}
+.who{font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:5px;display:flex;gap:8px}
+.turn.you .who{color:var(--listen)} .turn.jar .who{color:var(--speak)}
+.said{font-size:13.5px;line-height:1.5;color:var(--ink)}
+.turn.jar .said{color:#a9c9e8}
+mark{background:rgba(63,208,255,.14);color:var(--cy-hot);padding:0 4px;border:1px solid rgba(63,208,255,.32);
+  font-family:var(--mono);font-size:12px;border-radius:2px}
+.corrected{font-family:var(--mono);font-size:9.5px;color:var(--ink-faint);margin-top:5px}
+.corrected s{opacity:.55}
+
+/* ---------- right rail ---------- */
+.kv{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid rgba(80,180,255,.07);font-size:12.5px}
+.kv span{color:var(--ink-dim);font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase}
+.kv b{font-weight:500;font-family:var(--mono);font-size:12px}
+.tick{display:flex;align-items:center;gap:9px;padding:7px 0;font-size:12.5px;animation:rise .5s both}
+.tick i{width:5px;height:5px;border-radius:50%;background:var(--cy);flex:none;box-shadow:0 0 8px var(--cy)}
+.tick.mine i{background:var(--listen);box-shadow:0 0 8px var(--listen)}
+.tick code{font-family:var(--mono);font-size:11.5px;color:var(--cy-hot)}
+.tick em{color:var(--ink-dim);font-style:normal;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card{border:1px solid var(--line);border-left:2px solid var(--state);background:rgba(12,28,52,.5);
+  padding:10px 11px;margin-top:9px;animation:slide .55s cubic-bezier(.2,.9,.2,1) both}
+@keyframes slide{from{opacity:0;transform:translateX(22px)}}
+.card .t{font-family:var(--mono);font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:4px}
+.card .m{font-size:12.5px;line-height:1.45}
+.card.alert{border-left-color:var(--alert)} .card.alert .t{color:var(--alert)}
+
+/* ---------- job strip ---------- */
+.job{grid-column:1/-1;border:1px solid var(--line);background:var(--panel);backdrop-filter:blur(10px);
+  padding:13px 16px;display:grid;grid-template-columns:1fr auto;gap:10px 18px;align-items:center;
+  clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,14px 100%,0 calc(100% - 14px))}
+.job .head{font-family:var(--mono);font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:var(--ink-faint)}
+.job .what{font-size:14px;margin-top:5px;color:var(--ink)}
+.job .elapsed{font-family:var(--mono);font-size:26px;color:var(--think);font-variant-numeric:tabular-nums;text-shadow:0 0 18px rgba(255,176,56,.35)}
+.track{grid-column:1/-1;height:2px;background:rgba(80,180,255,.12);overflow:hidden;position:relative}
+.track::after{content:'';position:absolute;inset:0;width:34%;background:linear-gradient(90deg,transparent,var(--think),transparent);
+  animation:sweep 1.7s cubic-bezier(.5,0,.5,1) infinite}
+@keyframes sweep{to{transform:translateX(340%)}}
+.job.done .elapsed{color:var(--listen);text-shadow:0 0 18px rgba(62,224,143,.35)}
+.job.done .track::after{animation:none;width:100%;background:var(--listen);opacity:.5}
+.pill{font-family:var(--mono);font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;
+  border:1px solid var(--line-hot);padding:3px 8px;color:var(--ink-dim)}
+@media (max-width:1180px){.shell{grid-template-columns:1fr}.core{min-height:44vh}}
+</style>
+</head>
+<body>
+<div class="grain"></div>
+<div class="shell">
+
+  <header class="bar">
+    <div class="brand">JARVIS</div>
+    <div class="sep"></div>
+    <div class="chip">domain <b>mcsl</b></div>
+    <div class="chip">wake <b>hey jarvis</b></div>
+    <div class="chip">voice <b>Tara</b></div>
+    <div class="right">
+      <div class="chip">uptime <b id="up">04:12:38</b></div>
+      <div class="chip" id="stateChip">idle</div>
+      <div class="dot"></div>
+    </div>
+  </header>
+
+  <!-- transcript -->
+  <section class="panel">
+    <h2>Conversation</h2>
+    <div class="body" id="stream"></div>
+  </section>
+
+  <!-- reactor -->
+  <section class="core">
+    <div class="reactor">
+      <div class="halo"></div>
+      <svg viewBox="0 0 400 400">
+        <circle class="ring-bg" cx="200" cy="200" r="190"/>
+        <circle class="ring-bg" cx="200" cy="200" r="150"/>
+        <circle class="ring-bg" cx="200" cy="200" r="104"/>
+        <g class="spin-slow" id="ticks"></g>
+        <g class="spin-rev">
+          <path class="arc" d="M200 32 A168 168 0 0 1 342 118" opacity=".85"/>
+          <path class="arc" d="M58 282 A168 168 0 0 0 200 368" opacity=".55"/>
+        </g>
+        <g class="spin-slow">
+          <path class="arc" d="M200 62 A138 138 0 0 1 322 140" opacity=".35" stroke-width="1.5"/>
+        </g>
+        <g id="bars"></g>
+      </svg>
+      <div class="readout">
+        <div class="state-name" id="stateName">standby</div>
+        <div class="state-line" id="stateLine">listening for “hey jarvis”</div>
+        <div class="level" id="lvl">peak 0.006 · floor 0.006 · needs 0.250</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- right rail -->
+  <section class="panel">
+    <h2>Context</h2>
+    <div class="body">
+      <div class="kv"><span>release</span><b>MCSL 385</b></div>
+      <div class="kv"><span>assigned to you</span><b>3 / 29</b></div>
+      <div class="kv"><span>open ZI issues</span><b>10</b></div>
+      <div class="kv"><span>reminders</span><b>1 overdue</b></div>
+      <h2 style="padding-left:0;padding-top:16px">Your tickets</h2>
+      <div class="tick mine"><i></i><code>ZI-667</code><em>Canpar declared_value surcharge</em></div>
+      <div class="tick mine"><i></i><code>ZI-686</code><em>India Post bkg_ref_id on label</em></div>
+      <div class="tick mine"><i></i><code>ZI-687</code><em>Cutoff time not applied</em></div>
+      <h2 style="padding-left:0;padding-top:16px">Watchers</h2>
+      <div id="cards"></div>
+    </div>
+  </section>
+
+  <!-- job -->
+  <section class="job" id="job">
+    <div>
+      <div class="head">Background job <span class="pill" id="jobPill">running</span></div>
+      <div class="what" id="jobWhat">go through card ZI-687 and summarise the cutoff-time fix</div>
+    </div>
+    <div class="elapsed" id="jobTime">00:42</div>
+    <div class="track"></div>
+  </section>
+
+</div>
+
+<script>
+/* ---- tick marks around the dial ---- */
+const ticks = document.getElementById('ticks');
+for (let i = 0; i < 72; i++) {
+  const a = (i / 72) * Math.PI * 2, long = i % 6 === 0;
+  const r1 = long ? 172 : 180, r2 = 190;
+  const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  l.setAttribute('x1', 200 + Math.cos(a) * r1); l.setAttribute('y1', 200 + Math.sin(a) * r1);
+  l.setAttribute('x2', 200 + Math.cos(a) * r2); l.setAttribute('y2', 200 + Math.sin(a) * r2);
+  l.setAttribute('class', 'ring-tick'); l.setAttribute('opacity', long ? .6 : .22);
+  ticks.appendChild(l);
+}
+
+/* ---- amplitude bars: THIS is the mic level, not decoration ---- */
+const N = 64, bars = document.getElementById('bars'), lines = [];
+for (let i = 0; i < N; i++) {
+  const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  bars.appendChild(l); lines.push(l);
+}
+function drawBars(amp) {
+  for (let i = 0; i < N; i++) {
+    const a = (i / N) * Math.PI * 2 - Math.PI / 2;
+    const jitter = 0.35 + 0.65 * Math.abs(Math.sin(i * 12.9898 + perf * 0.004));
+    const len = 8 + amp * 52 * jitter;
+    const r1 = 110, r2 = r1 + len;
+    lines[i].setAttribute('x1', 200 + Math.cos(a) * r1);
+    lines[i].setAttribute('y1', 200 + Math.sin(a) * r1);
+    lines[i].setAttribute('x2', 200 + Math.cos(a) * r2);
+    lines[i].setAttribute('y2', 200 + Math.sin(a) * r2);
+    lines[i].setAttribute('opacity', 0.25 + amp * 0.75);
+  }
+}
+
+/* ---- state machine, mirroring the real daemon ---- */
+const STATES = {
+  idle:      { name:'standby',   line:'listening for “hey jarvis”', colour:'var(--idle)'   },
+  listening: { name:'listening', line:'go ahead, boss',             colour:'var(--listen)' },
+  thinking:  { name:'working',   line:'fetching that now',          colour:'var(--think)'  },
+  speaking:  { name:'speaking',  line:'',                           colour:'var(--speak)'  },
+};
+const root = document.documentElement;
+function setState(s, line) {
+  const st = STATES[s];
+  root.style.setProperty('--state', st.colour);
+  document.getElementById('stateName').textContent = st.name;
+  document.getElementById('stateLine').textContent = line || st.line;
+  document.getElementById('stateChip').textContent = s;
+}
+
+/* ---- transcript ---- */
+const stream = document.getElementById('stream');
+function turn(who, html, corrected) {
+  const d = document.createElement('div');
+  d.className = 'turn ' + (who === 'you' ? 'you' : 'jar');
+  d.innerHTML = `<div class="who"><span>${who === 'you' ? 'madan' : 'jarvis'}</span>
+      <span style="color:var(--ink-faint)">${new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span></div>
+    <div class="said">${html}</div>${corrected ? `<div class="corrected">${corrected}</div>` : ''}`;
+  stream.appendChild(d); stream.scrollTop = stream.scrollHeight;
+  while (stream.children.length > 14) stream.removeChild(stream.firstChild);
+}
+
+/* ---- watcher cards ---- */
+const cards = document.getElementById('cards');
+function card(kind, title, msg) {
+  const d = document.createElement('div');
+  d.className = 'card' + (kind === 'alert' ? ' alert' : '');
+  d.innerHTML = `<div class="t">${title}</div><div class="m">${msg}</div>`;
+  cards.prepend(d);
+  while (cards.children.length > 3) cards.removeChild(cards.lastChild);
+}
+
+/* ---- the scripted demo, timed like a real conversation ---- */
+let perf = 0, amp = 0, target = 0;
+const script = [
+  [   0, () => { setState('idle'); }],
+  [1800, () => { setState('listening','go ahead, boss'); target = .55; }],
+  [2400, () => turn('you','in <mark>MCSL 385</mark> how many tickets assigned to me',
+                    '<s>in muscle three eighty five…</s> → snapped to MCSL-385')],
+  [3600, () => { setState('thinking'); target = .06; }],
+  [4600, () => { setState('speaking'); target = .30;
+                 turn('jar','3 tickets assigned to you in SL MCSL 385: <mark>ZI-667</mark>, <mark>ZI-686</mark>, <mark>ZI-687</mark>'); }],
+  [7200, () => { setState('listening'); target = .5; }],
+  [7800, () => turn('you','who is the dev for <mark>that</mark>','“that” → ZI-667 from context')],
+  [8600, () => { setState('speaking'); target = .28;
+                 turn('jar','ZI-667 has vaibhav, Madan Kumar AS on it, and a pull request open.'); }],
+  [11000,() => { setState('listening'); target = .52; }],
+  [11600,() => turn('you','go through card <mark>ZI-687</mark> and summarise the cutoff-time fix')],
+  [12400,() => { setState('thinking'); target = .05;
+                 document.getElementById('job').classList.remove('done');
+                 document.getElementById('jobPill').textContent = 'running';
+                 jobStart = perf; jobRunning = true; }],
+  [14000,() => card('info','trello · 10 min ago','ZI-701 added to SL MCSL 386')],
+  [18000,() => card('alert','reminder · due','check the GLS packaging store')],
+  [22000,() => { jobRunning = false;
+                 document.getElementById('job').classList.add('done');
+                 document.getElementById('jobPill').textContent = 'finished';
+                 setState('speaking'); target = .32;
+                 turn('jar','The cutoff fix is merged and ready for QA on the Canada Post lane. What do you want to do?'); }],
+  [26000,() => card('info','slack · 2 min ago','Ashok Kumar replied: “toggle is on now”')],
+  [28000,() => { setState('idle'); target = .03; }],
+];
+let cursor = 0, jobStart = 0, jobRunning = false;
+
+function frame(t) {
+  perf = t;
+  while (cursor < script.length && t >= script[cursor][0]) script[cursor++][1]();
+  if (cursor >= script.length && t > 31000) { cursor = 0; perf = 0; stream.innerHTML = ''; requestAnimationFrame(() => {}); }
+
+  /* bursty approach to target, the way speech actually behaves */
+  const burst = target > .1 ? (Math.random() * .5 + .5) : 1;
+  amp += ((target * burst) - amp) * .16;
+  drawBars(Math.max(0, amp));
+
+  const peak = (0.006 + amp * 4.2).toFixed(3);
+  document.getElementById('lvl').textContent = `peak ${peak} · floor 0.006 · needs 0.250`;
+
+  if (jobRunning) {
+    const s = Math.floor((t - jobStart) / 1000);
+    document.getElementById('jobTime').textContent =
+      `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* uptime ticker */
+let up = 4*3600 + 12*60 + 38;
+setInterval(() => {
+  up++;
+  const h = Math.floor(up/3600), m = Math.floor(up%3600/60), s = up%60;
+  document.getElementById('up').textContent =
+    `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}, 1000);
+</script>
+</body>
+</html>
