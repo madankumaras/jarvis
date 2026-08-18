@@ -97,6 +97,39 @@ def _release_params(m: re.Match[str]) -> dict:
     return {"release": m.group("release")}
 
 
+_BARE_RELEASE = re.compile(r"\b(?:MCSL[\s-]?)?(\d{3,4})\b(?![-\d])")
+
+
+_BARE_CARD = re.compile(
+    r"\b(?!MCSL\b)([A-Z]{2,6}-\d{1,5})\b|\b(?:card|ticket|issue)\s+(\d{2,5})\b(?![-\d])",
+    re.I,
+)
+
+
+def _card_from_text(m: re.Match[str]) -> dict:
+    """Pull a card id out of the whole utterance.
+
+    Used where the id may appear before or after the trigger, and where
+    embedding _CARD_REF twice would redefine its named groups.
+    """
+    found = _BARE_CARD.search(m.string)
+    if not found:
+        return {"card_id": ""}
+    explicit, number = found.group(1), found.group(2)
+    return {"card_id": explicit.upper() if explicit else f"ZI-{number}"}
+
+
+def _release_from_text(m: re.Match[str]) -> dict:
+    """Pull a release number out of the whole utterance.
+
+    Used where the trigger phrase and the number are far apart, and where
+    embedding the shared _RELEASE_ID pattern more than once would redefine its
+    named group. An empty string means "the active release".
+    """
+    found = _BARE_RELEASE.search(m.string)
+    return {"release": found.group(1) if found else ""}
+
+
 # Order is precedence, not priority: match() returns the first entry whose
 # pattern matches, not the best or most specific one. Earlier entries win
 # when an utterance could plausibly match more than one intent. release_status
@@ -172,6 +205,36 @@ INTENTS: list[Intent] = [
         extract=lambda m: {"person": (m.group("person") or m.group("person2") or m.group("person3") or "").strip()},
     ),
     Intent(
+        name="release_progress",
+        method="release_progress",
+        # "is 385 done", "what's left in 385", "release status", "how far is 385"
+        #
+        # The trigger is matched here; the release number is pulled out of the
+        # whole utterance separately. Embedding _RELEASE_ID four times would
+        # redefine its named group, which re rejects outright.
+        pattern=re.compile(
+            # "is 385 done" needs the number: "29 cards are done" is a
+            # statement, not a question about a release.
+            r"\b(?:is|are)\b\D{0,12}\d{3,4}\b.{0,20}?\b(?:done|complete|finished|ready)\b"
+            r"|\bwhat'?s?\s+(?:left|pending|remaining)\b"
+            r"|\bhow\s+far\b"
+            r"|\brelease\s+(?:status|progress)\b",
+            re.I,
+        ),
+        extract=_release_from_text,
+    ),
+    Intent(
+        name="active_release",
+        method="active_release",
+        # "which release are we working on", "what release is active"
+        pattern=re.compile(
+            r"\bwhich\s+release\b|\bwhat\s+release\b.{0,20}?\b(?:active|working|now|current)\b"
+            r"|\bcurrent\s+release\b",
+            re.I,
+        ),
+        extract=_no_params,
+    ),
+    Intent(
         name="post_channel",
         method="post_channel",
         # "post in qa-team saying the toggle is off",
@@ -231,11 +294,21 @@ INTENTS: list[Intent] = [
         # Ordinary verbs count. Real transcripts: "go through card ZI-667",
         # "can I go through with the card 667 in MCSL-380".
         pattern=re.compile(
+            # Real transcripts, all meaning "tell me about this card":
+            #   "go through card ZI-667"
+            #   "Okay, in ZI-667 what is the issue?"
+            #   "can I go through with the card 667 in MCSL-380"
             rf"\b(?:status|state|what'?s? happening|go\s+through|open|check|"
-            rf"look\s+at|read|show|tell\s+me\s+about|about)\b.{{0,40}}?{_CARD_REF}",
+            rf"look\s+at|read|show|tell\s+me\s+about|about|issue|problem|"
+            rf"what'?s?\s+wrong|details?|summary)\b.{{0,40}}?{_CARD_REF}"
+            # ...and the same question with the id first. The id is pulled from
+            # the whole utterance rather than captured twice: repeating
+            # _CARD_REF would redefine its named groups, which re rejects.
+            rf"|\b(?!MCSL\b)[A-Z]{{2,6}}-\d{{1,5}}\b.{{0,40}}?\b(?:issue|problem|"
+            rf"status|about|details?|summary|what'?s?\s+wrong|happening)\b",
             re.I,
         ),
-        extract=_card_params,
+        extract=_card_from_text,
     ),
     Intent(
         name="my_release_cards",
@@ -252,6 +325,30 @@ INTENTS: list[Intent] = [
             re.I,
         ),
         extract=_release_params,
+    ),
+    Intent(
+        name="my_work",
+        method="my_work",
+        # "what should I test", "what cards assigned to me", "my cards".
+        #
+        # After my_release_cards on purpose: that one needs both a release
+        # and a self-reference, so "my tickets in 386" belongs to it. This
+        # handles the bare question, where "which release" is itself part
+        # of what you are asking.
+        # Distinct from my_tasks: this reads the QA labels, so a verified card
+        # is not offered as work and a duplicate is flagged as a sanity check.
+        pattern=re.compile(
+            r"\bwhat\s+(?:should|do|must)\s+i\s+(?:test|do|work\s+on)\b"
+            r"|\bmy\s+work\b|\bwhat'?s?\s+(?:left|pending)\s+for\s+me\b"
+            r"|\bwhat\s+(?:needs?|is)\s+testing\b"
+            # "what cards assigned to me" with no release named -- the whole
+            # point of my_work over my_tasks is that it reads the QA labels,
+            # so this is the better answer to the plain question too.
+            r"|\b(?:cards?|tickets?)\s+assigned\s+to\s+me\b"
+            r"|\bmy\s+(?:cards?|tickets?)\b",
+            re.I,
+        ),
+        extract=_no_params,
     ),
     Intent(
         name="release_status",

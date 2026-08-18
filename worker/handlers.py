@@ -334,6 +334,159 @@ def customer_issues() -> dict[str, Any]:
     return {"speech": speech, "detail": detail}
 
 
+def _classify(labels) -> "object":
+    from qa_labels import classify
+
+    return classify([l.get("name", "") if isinstance(l, dict) else str(l) for l in (labels or [])])
+
+
+def _release_states(client, lst) -> list:
+    """QA state for every card in a release list."""
+    raw = _raw_cards(client, lst.id, fields="name,idMembers,labels")
+    return [(c, _classify(c.get("labels"))) for c in raw]
+
+
+def active_release() -> dict[str, Any]:
+    """The release QA is actually working on.
+
+    Not the highest number: a fresh intake list can exist with nothing started,
+    while the real work sits one release back. Verified on the live board --
+    MCSL 386 had 8 untouched cards while MCSL 385 had 17 sitting at QA. The
+    active release is the one with outstanding testable work, most recent first.
+    """
+    from qa_labels import progress
+
+    client = _trello()
+    releases = _release_lists(client)
+    if not releases:
+        return {"release": "", "id": "", "outstanding": 0}
+
+    # Where the bulk of the work is, not merely the first list with any.
+    # Verified on the live board: MCSL 386 had 2 outstanding cards from a fresh
+    # intake while MCSL 385 had 16 mid-test. Taking the first non-empty list
+    # newest-first chose 386, which is the wrong answer to "what are we
+    # working on". Ties break towards the newer release.
+    scored = []
+    for lst in releases[:4]:
+        p = progress([st for _, st in _release_states(client, lst)])
+        scored.append((p["outstanding"], lst, p))
+
+    scored.sort(key=lambda t: t[0], reverse=True)
+    outstanding, lst, p = scored[0]
+    if not outstanding:
+        lst, p = releases[0], progress([st for _, st in _release_states(client, releases[0])])
+    return {"release": lst.name, "id": lst.id, **p}
+
+
+def release_progress(release: str = "") -> dict[str, Any]:
+    """Spoken answer to "is 385 done" / "what is left in 385"."""
+    from qa_labels import progress
+
+    client = _trello()
+    releases = _release_lists(client)
+    wanted = re.sub(r"[^0-9.]", "", release)
+
+    target = None
+    if wanted:
+        target = next((l for l in releases if wanted in l.name.replace(" ", "")), None)
+    else:
+        active = active_release()
+        target = next((l for l in releases if l.name == active.get("release")), None)
+    if target is None:
+        return {"speech": f"No release list matching {release}.", "detail": ""}
+
+    pairs = _release_states(client, target)
+    p = progress([st for _, st in pairs])
+
+    if p["complete"]:
+        speech = f"{target.name} is complete: all {p['verified']} testable cards verified."
+    else:
+        speech = (
+            f"{target.name} is in progress: {p['verified']} of {p['testable']} verified, "
+            f"{p['outstanding']} still to test."
+        )
+    extras = []
+    if p["skipped"]:
+        extras.append(f"{p['skipped']} closed by support")
+    if p["duplicates"]:
+        extras.append(f"{p['duplicates']} marked duplicate")
+    if p["spilled"]:
+        extras.append(f"{p['spilled']} spilled over")
+    if extras:
+        speech += " Also " + ", ".join(extras) + "."
+
+    detail = "\n".join(
+        f"{_short(c.get('name',''))}  {st.state}" + (f"  ({st.note})" if st.note else "")
+        for c, st in pairs
+    )
+    return {"speech": speech, "detail": detail, **p, "release": target.name}
+
+
+def my_work(release: str = "") -> dict[str, Any]:
+    """Your cards and what each one actually needs.
+
+    The point of this over my_tasks: it reads the QA labels, so a verified card
+    is not presented as work, a support-closed card is not presented as
+    testing, and a duplicate is flagged as a sanity check.
+    """
+    client = _trello()
+    me = client._get("members/me", fields="id")["id"]
+    releases = _release_lists(client)
+    wanted = re.sub(r"[^0-9.]", "", release)
+    if wanted:
+        releases = [l for l in releases if wanted in l.name.replace(" ", "")]
+    else:
+        releases = releases[:3]
+
+    items = []
+    for lst in releases:
+        for card, st in _release_states(client, lst):
+            if me not in (card.get("idMembers") or []):
+                continue
+            name = card.get("name", "")
+            after = name.split("\u2014", 1)[-1] if "\u2014" in name else name
+            items.append({
+                "id": _short(name),
+                "release": lst.name,
+                "title": re.sub(r"\s*\[#\d+\]\s*$", "", after).strip(),
+                "state": st.state,
+                "meaning": st.meaning,
+                "note": st.note,
+                "duplicate": st.duplicate,
+                "actionable": st.actionable,
+            })
+
+    todo = [i for i in items if i["actionable"]]
+    done = [i for i in items if not i["actionable"]]
+
+    if not items:
+        return {"speech": "Nothing assigned to you in the current releases.", "detail": "", "items": []}
+    if not todo:
+        return {
+            "speech": f"All {len(done)} of your cards are done — nothing to test.",
+            "detail": "\n".join(f"{i['id']} {i['state']}" for i in items),
+            "items": items,
+        }
+
+    bits = []
+    for i in todo[:4]:
+        bit = f"{i['id']}, {i['meaning']}"
+        if i["note"]:
+            bit += f" — {i['note']}"
+        bits.append(bit)
+    speech = f"{len(todo)} to test. " + ". ".join(bits) + "."
+    if done:
+        speech += f" {len(done)} already done."
+    return {
+        "speech": speech,
+        "detail": "\n".join(
+            f"{i['id']}  {i['state']}  {i['release']}" + (f"  ({i['note']})" if i["note"] else "")
+            for i in items
+        ),
+        "items": items,
+    }
+
+
 def _find_card(client, card_id: str):
     """Locate a card by its ZI id across the release lists. Returns raw dict."""
     token = card_id.upper()
@@ -584,6 +737,9 @@ HANDLERS = {
     "release_status": release_status,
     "my_tasks": my_tasks,
     "my_release_cards": my_release_cards,
+    "my_work": my_work,
+    "active_release": active_release,
+    "release_progress": release_progress,
     "dev_status": dev_status,
     "customer_issues": customer_issues,
     "vocab": vocab,

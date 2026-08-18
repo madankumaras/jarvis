@@ -603,3 +603,60 @@ def test_an_unknown_app_is_reported(vocab):
     w = FakeWorker(methods=WIDE)
     resp = handle_transcript("open nonsense", vocab, w)
     assert resp.ok is False
+
+
+# --- labels are the QA workflow ---
+
+QA_METHODS = WIDE + ("my_work", "active_release", "release_progress")
+
+
+@pytest.mark.parametrize("utterance", [
+    "what cards assigned to me", "my cards", "my tickets",
+    "what should I test", "what needs testing", "what is my work",
+])
+def test_the_bare_question_uses_the_label_aware_answer(vocab, utterance):
+    """my_work reads QA labels: a verified card is not offered as work, and a
+    duplicate is flagged as a sanity check. my_tasks cannot tell the
+    difference."""
+    w = FakeWorker(methods=QA_METHODS)
+    w.results = {"my_work": {"speech": "3 to test", "detail": "", "items": []}}
+    handle_transcript(utterance, vocab, w)
+    assert w.calls[0][0] == "my_work"
+
+
+@pytest.mark.parametrize("utterance,digits", [
+    ("is 385 done", "385"),
+    ("what's left in 385", "385"),
+    ("how far is 385", "385"),
+])
+def test_release_progress_extracts_the_release(vocab, utterance, digits):
+    w = FakeWorker(methods=QA_METHODS)
+    w.results = {"release_progress": {"speech": "in progress", "detail": ""}}
+    handle_transcript(utterance, vocab, w)
+    assert w.calls[0] == ("release_progress", {"release": digits})
+
+
+def test_release_progress_with_no_number_means_the_active_release(vocab):
+    w = FakeWorker(methods=QA_METHODS)
+    w.results = {"release_progress": {"speech": "in progress", "detail": ""}}
+    handle_transcript("release status", vocab, w)
+    assert w.calls[0] == ("release_progress", {"release": ""})
+
+
+@pytest.mark.parametrize("utterance", [
+    "which release are we working on", "current release",
+])
+def test_asking_which_release_is_active(vocab, utterance):
+    w = FakeWorker(methods=QA_METHODS)
+    w.results = {"active_release": {"speech": "MCSL 385", "detail": ""}}
+    handle_transcript(utterance, vocab, w)
+    assert w.calls[0][0] == "active_release"
+
+
+def test_a_named_release_still_wins_over_the_bare_question(vocab):
+    """"my tickets in 386" names a release, so it belongs to my_release_cards
+    rather than the label-aware summary of everything."""
+    w = FakeWorker(methods=QA_METHODS)
+    w.results = {"my_release_cards": {"speech": "none", "detail": "", "ids": []}}
+    handle_transcript("my tickets in 386", vocab, w)
+    assert w.calls[0][0] == "my_release_cards"

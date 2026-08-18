@@ -114,6 +114,15 @@ mark{background:rgba(63,208,255,.14);color:var(--cy-hot);padding:0 4px;border:1p
 .tick.mine i{background:var(--listen);box-shadow:0 0 8px var(--listen)}
 .tick code{font-family:var(--mono);font-size:11.5px;color:var(--cy-hot);white-space:nowrap;flex:none}
 .tick em{color:var(--ink-dim);font-style:normal;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.st{font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;
+  border:1px solid currentColor;padding:1px 5px;flex:none;opacity:.9}
+.st.in_qa{color:var(--think)} .st.dev_done{color:var(--cy)} .st.verified{color:var(--listen)}
+.st.qa_reported{color:var(--alert)} .st.closed_by_support{color:var(--ink-faint)}
+.st.in_dev,.st.investigation,.st.spill_over,.st.unlabelled{color:var(--ink-dim)}
+.tick.dupe em::after{content:' · dup';color:var(--speak);font-family:var(--mono);font-size:9.5px}
+.prog{height:3px;background:rgba(80,180,255,.12);margin:8px 0 2px;position:relative;overflow:hidden}
+.prog i{position:absolute;inset:0 auto 0 0;background:var(--listen);box-shadow:0 0 10px var(--listen);
+  transition:width .6s cubic-bezier(.2,.9,.2,1)}
 .card{border:1px solid var(--line);border-left:2px solid var(--state);background:rgba(12,28,52,.5);
   padding:10px 11px;margin-top:9px;animation:slide .55s cubic-bezier(.2,.9,.2,1) both}
 @keyframes slide{from{opacity:0;transform:translateX(22px)}}
@@ -194,10 +203,14 @@ mark{background:rgba(63,208,255,.14);color:var(--cy-hot);padding:0 4px;border:1p
     <h2>Context</h2>
     <div class="body">
       <div class="kv"><span>release</span><b id="cRelease">—</b></div>
-      <div class="kv"><span>yours · here / release</span><b id="cMine">—</b></div>
+      <div class="kv"><span>verified</span><b id="cProgress">—</b></div>
+      <div class="prog"><i id="cBar" style="width:0"></i></div>
+      <div class="kv"><span>still to test</span><b id="cOut">—</b></div>
+      <div class="kv"><span>skipped · duplicate</span><b id="cSkip">—</b></div>
+      <div class="kv"><span>yours</span><b id="cMine">—</b></div>
       <div class="kv"><span>open ZI issues</span><b id="cIssues">—</b></div>
       <div class="kv"><span>reminders</span><b id="cReminders">—</b></div>
-      <h2 style="padding-left:0;padding-top:16px">Assigned to you</h2>
+      <h2 style="padding-left:0;padding-top:16px">Your cards</h2>
       <div id="cTickets"></div>
       <h2 style="padding-left:0;padding-top:16px">Watchers</h2>
       <div id="cards"></div>
@@ -301,12 +314,36 @@ setInterval(() => {
 }, 500);
 
 /* ---- context rail ---- */
+const STATE_LABEL = {
+  in_qa:'to test', dev_done:'ready', verified:'done', qa_reported:'bug raised',
+  closed_by_support:'skip', in_dev:'in dev', investigation:'investigating',
+  spill_over:'spilled', unlabelled:'no label',
+};
 function context(d) {
   const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.textContent = v; };
-  set('cRelease', d.release); set('cMine', d.mine); set('cIssues', d.issues); set('cReminders', d.reminders);
+  set('cRelease', d.release); set('cMine', d.mine);
+  set('cIssues', d.issues); set('cReminders', d.reminders);
+  set('cProgress', d.progress); set('cOut', d.outstanding);
+  if (d.skipped != null) set('cSkip', `${d.skipped} · ${d.duplicates ?? 0}`);
+
+  /* progress bar reads the release, not the ticket list */
+  const m = String(d.progress || '').match(/(\d+)\s*\/\s*(\d+)/);
+  if (m) {
+    const pct = Number(m[2]) ? (Number(m[1]) / Number(m[2])) * 100 : 0;
+    document.getElementById('cBar').style.width = pct.toFixed(1) + '%';
+  }
+
   if (Array.isArray(d.tickets)) {
-    document.getElementById('cTickets').innerHTML = d.tickets.map(x =>
-      `<div class="tick mine"><i></i><code>${esc(x.id)}</code><em>${esc(x.title)}</em></div>`).join('');
+    /* Actionable first: a verified card is not work. */
+    const rows = [...d.tickets].sort((a, b) => (b.actionable === true) - (a.actionable === true));
+    document.getElementById('cTickets').innerHTML = rows.map(x => {
+      const st = x.state || 'unlabelled';
+      return `<div class="tick ${x.actionable ? 'mine' : ''} ${x.note && x.note.includes('duplicate') ? 'dupe' : ''}"
+          title="${esc(x.note || STATE_LABEL[st] || st)}">
+        <i></i><code>${esc(x.id)}</code>
+        <span class="st ${esc(st)}">${esc(STATE_LABEL[st] || st)}</span>
+        <em>${esc(x.title)}</em></div>`;
+    }).join('');
   }
 }
 

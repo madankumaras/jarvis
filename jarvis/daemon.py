@@ -78,27 +78,33 @@ class Jarvis:
         """Refresh the right-hand rail. Best effort: a dashboard that cannot be
         populated is not a reason to interrupt a turn."""
         try:
-            everything = self.worker.call("release_card_ids")
-            release = everything.get("release", "")
-            all_ids = everything.get("ids", [])
-            titles = everything.get("titles", {})
-
-            # Cards actually assigned to you, across the current releases --
-            # the newest release often has none of yours, and a rail reading
-            # "0" is accurate but useless. Labelling the release total as
-            # "assigned to you" would be worse: confidently wrong.
-            items = self.worker.call("my_tasks").get("items", [])
-            in_newest = [m for m in items if m.get("release") == release]
+            # The ACTIVE release, not the newest. A fresh intake list can exist
+            # with nothing started while the real work sits one release back:
+            # MCSL 386 had 8 untouched cards while 385 had 16 mid-test.
+            active = self.worker.call("active_release")
+            work = self.worker.call("my_work")
+            items = work.get("items", [])
+            todo = [i for i in items if i.get("actionable")]
 
             BUS.publish(
                 "context",
-                release=release,
-                mine=f"{len(in_newest)} of {len(all_ids)} · {len(items)} total",
+                release=active.get("release", ""),
+                progress=f"{active.get('verified', 0)} / {active.get('testable', 0)} verified",
+                outstanding=active.get("outstanding", 0),
+                skipped=active.get("skipped", 0),
+                duplicates=active.get("duplicates", 0),
+                mine=f"{len(todo)} to test · {len(items)} total",
                 issues=len(self.vocab.zi_ids),
                 reminders=len(self.store.due_tasks()),
                 tickets=[
-                    {"id": m["id"], "title": m.get("title") or titles.get(m["id"], "")}
-                    for m in items[:10]
+                    {
+                        "id": i["id"],
+                        "title": i.get("title", ""),
+                        "state": i.get("state", ""),
+                        "note": i.get("note", ""),
+                        "actionable": bool(i.get("actionable")),
+                    }
+                    for i in items[:12]
                 ],
             )
         except Exception:

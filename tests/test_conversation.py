@@ -118,3 +118,35 @@ def test_conversation_reports_when_it_is_waiting_on_an_answer():
     assert c.expects_answer() is True
     c.slots.fill("Ashok")
     assert c.expects_answer() is False
+
+
+# --- an explicit id settles the question ---
+
+@pytest.mark.parametrize("said", [
+    "Okay, in ZI-667 what is the issue?",
+    "what is the issue in ZI-667",
+    "go through card 667 and tell me the issue",
+    "the issue with ZI-686",
+])
+def test_a_sentence_naming_a_card_is_never_an_unresolved_reference(said):
+    """Regression: "the issue" matched the back-reference pattern and asked
+    "which card do you mean?" while ZI-667 sat in the same sentence."""
+    assert Conversation().unresolved_reference(said) is False
+
+
+def test_an_explicit_id_is_not_overwritten_by_the_remembered_one():
+    c = Conversation(last_card="ZI-999")
+    assert "ZI-667" in c.resolve("what is the issue in ZI-667")
+    assert "ZI-999" not in c.resolve("what is the issue in ZI-667")
+
+
+@pytest.mark.parametrize("said", [
+    "go through that card", "what about the ticket", "check that one",
+])
+def test_a_bare_reference_with_nothing_remembered_still_asks(said):
+    assert Conversation().unresolved_reference(said) is True
+
+
+def test_mcsl_is_not_treated_as_an_explicit_card_id():
+    """MCSL-385 names a release; "the card" alongside it is still dangling."""
+    assert Conversation().unresolved_reference("in MCSL-385 what is the card") is True

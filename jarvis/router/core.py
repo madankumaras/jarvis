@@ -143,6 +143,14 @@ def _handle(
             ok=False,
         )
 
+    # A listing answer sets the subject for the next turn: after "what should I
+    # test", "go through that card" should mean the first one it named.
+    if conversation is not None and not conversation.last_card:
+        listed = payload.get("items") or []
+        first = next((i for i in listed if i.get("actionable")), None) or (listed[0] if listed else None)
+        if isinstance(first, dict) and first.get("id"):
+            conversation.last_card = first["id"]
+
     # "What are my tasks" means both things you told Jarvis and what Trello
     # says. Asking twice would be a worse product than merging once.
     if intent.name == "my_tasks" and store is not None:

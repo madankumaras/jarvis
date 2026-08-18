@@ -21,6 +21,11 @@ from typing import Any
 _CARD_REFS = re.compile(
     r"\b(?:that|the|this|it|same)\s+(?:card|ticket|issue|one)\b|\bit\b|\bthat one\b", re.I
 )
+# An explicit id anywhere in the sentence settles the question, so a phrase
+# like "the issue" is not a dangling reference. Observed: "Okay, in ZI-667
+# what is the issue?" was answered with "Which card do you mean?" because
+# "the issue" matched while ZI-667 sat in the same sentence.
+_EXPLICIT_ID = re.compile(r"\b(?!MCSL\b)[A-Z]{2,6}-\d{1,5}\b|\b(?:card|ticket|issue)\s+\d{2,5}\b", re.I)
 _PERSON_REFS = re.compile(r"\b(?:him|her|them|same person)\b", re.I)
 
 # Anything that should close the conversation rather than be answered.
@@ -92,6 +97,9 @@ class Conversation:
         cannot resolve".
         """
         out = text or ""
+        # Do not overwrite an id the user actually said.
+        if _EXPLICIT_ID.search(out):
+            return out
         if self.last_card and _CARD_REFS.search(out):
             out = _CARD_REFS.sub(self.last_card, out, count=1)
         if self.last_person and _PERSON_REFS.search(out):
@@ -99,5 +107,12 @@ class Conversation:
         return out
 
     def unresolved_reference(self, text: str) -> bool:
-        """True when the user referred back but there is nothing to refer to."""
-        return not self.last_card and bool(_CARD_REFS.search(text or ""))
+        """True when the user referred back and there is nothing to refer to.
+
+        A sentence naming a card explicitly is never unresolved, however it is
+        phrased around that id.
+        """
+        said = text or ""
+        if _EXPLICIT_ID.search(said):
+            return False
+        return not self.last_card and bool(_CARD_REFS.search(said))

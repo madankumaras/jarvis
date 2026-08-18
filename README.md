@@ -95,6 +95,10 @@ No microphone handy? The same pipeline works typed:
 | "remind me to check ZI-653 at 4" | fires at 16:00, survives a restart |
 | "note that the GLS store needs re-toggling" | remembered |
 | "DM Ashok saying the toggle is off" | read back, waits for "ok" |
+| "what cards assigned to me" | your cards **with QA state** — verified ones are not offered as work |
+| "what should I test" | only what actually needs testing, duplicates flagged |
+| "is 385 done" | verified / testable, excluding support-closed cards |
+| "which release are we working on" | the release with outstanding QA work, not the newest |
 | "who is the dev for that" | Trello members plus whether a PR is open |
 | "what is the testing plan for that" | the generated test cases for that ticket |
 | "open slack" / "launch vs code" | launches the app |
@@ -124,6 +128,31 @@ Anything that leaves your machine — a Slack DM, a store creation — is read b
 to you and waits for an explicit "ok". Anything that is not a bare affirmative
 counts as no: "ok so actually make it the GLS store" is a correction, not
 consent. Reminders and notes are local and need no confirmation.
+
+## Labels are the workflow
+
+The board carries 50 labels. These decide whether a card needs testing, and
+Jarvis reads them rather than treating every card as work:
+
+| Label | Meaning |
+|---|---|
+| `QA` without `QA_VERIFIED` | needs testing — your actual queue |
+| `QA_VERIFIED` | done |
+| `QA Reported` | bug raised, back with dev |
+| `Dev Done` | ready for QA |
+| `SL: Closed By Support` | **do not test** |
+| `SL: 🔄 Duplicate` | likely a sanity check, not a full pass |
+| `Spill Over` | carried from an earlier release |
+
+Two consequences worth knowing:
+
+**Support-closed cards are excluded from the denominator.** Counting them as
+outstanding would make every release look unfinished forever — MCSL 385 has 7.
+
+**The active release is the one with the most outstanding QA work, not the
+highest number.** A fresh intake list can exist with nothing started while the
+real work sits one release back: 386 had 8 untouched cards while 385 had 16
+mid-test, and "newest" gave the wrong answer.
 
 ## Domains
 
