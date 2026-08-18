@@ -15,13 +15,22 @@ def test_say_shells_out_to_macos_say():
 
 
 def test_say_passes_dash_leading_text_after_a_separator():
-    # Without `--`, say parses "-x ..." as a flag and refuses the utterance.
-    # Trello titles and comments routinely start with a dash.
+    """Two defences against the same bug, deliberately.
+
+    Without `--`, say parses "-x ..." as a flag and refuses the utterance --
+    and Trello titles routinely start with a dash. Sanitising now strips a
+    leading dash as well, so the separator is belt-and-braces rather than the
+    only guard. Both are asserted: relying on sanitisation alone would break
+    the moment a dash survived it.
+    """
     with patch("subprocess.run") as run:
         say("-x fixed the toggle")
     argv = run.call_args[0][0]
     assert "--" in argv
-    assert argv.index("--") < argv.index("-x fixed the toggle")
+    spoken = argv[-1]
+    assert argv.index("--") < len(argv) - 1
+    assert not spoken.startswith("-"), "a leading dash reached say()"
+    assert "fixed the toggle" in spoken
 
 
 def test_say_ignores_empty_text():
@@ -139,3 +148,77 @@ def test_no_duplicate_voices():
 
     names = [n for n, _ in english_voices()]
     assert len(names) == len(set(names))
+
+
+# --- emoji in Trello comments were being read aloud by name ---
+
+def test_emoji_are_removed_not_read_aloud():
+    """macOS `say` reads emoji by their Unicode names, so a comment containing
+    🧪 ✅ → • became "test tube", "white heavy check mark", "rightwards arrow",
+    "bullet". That is what "it talked another language" actually was."""
+    from jarvis.voice.speak import speakable
+
+    out = speakable("Reassessment 🧪 done ✅ • see → next")
+    for ch in ("🧪", "✅", "•", "→"):
+        assert ch not in out
+    assert "Reassessment" in out and "done" in out
+
+
+def test_a_ticket_reference_is_spoken_as_words():
+    from jarvis.voice.speak import speakable
+
+    assert "ticket 399431" in speakable("cutoff time not applied [#399431]")
+
+
+def test_the_ticket_rule_runs_before_the_markdown_rule():
+    """The markdown rule strips '#', which the ticket rule needs. Ordering bug
+    turned "[#39993]" into "[ 39993]"."""
+    from jarvis.voice.speak import speakable
+
+    assert "[" not in speakable("surcharge [#39993] in MCSL 385")
+
+
+def test_markdown_scaffolding_is_stripped():
+    from jarvis.voice.speak import speakable
+
+    assert speakable("**Reassessment completed**") == "Reassessment completed"
+
+
+def test_a_url_is_not_spelled_out():
+    from jarvis.voice.speak import speakable
+
+    out = speakable("see https://trello.com/c/UhLpxjzk for detail")
+    assert "https" not in out
+    assert "a link" in out
+
+
+def test_an_em_dash_becomes_a_pause():
+    from jarvis.voice.speak import speakable
+
+    assert "—" not in speakable("needs testing — marked duplicate")
+
+
+def test_sanitising_never_returns_none_or_crashes():
+    from jarvis.voice.speak import speakable
+
+    assert speakable("") == ""
+    assert speakable(None) == ""
+    assert speakable("🧪🚚✅") == ""
+
+
+def test_say_speaks_the_sanitised_text():
+    import jarvis.voice.speak as sp
+
+    with patch("subprocess.run") as run:
+        sp.say("done ✅ — see → next")
+    spoken = run.call_args[0][0][-1]
+    assert "✅" not in spoken and "→" not in spoken
+
+
+def test_say_skips_text_that_sanitises_to_nothing():
+    """A comment that is only emoji must not fire an empty utterance."""
+    import jarvis.voice.speak as sp
+
+    with patch("subprocess.run") as run:
+        sp.say("🧪 ✅ •")
+    run.assert_not_called()

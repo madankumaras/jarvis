@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 
 from jarvis.types import Response
@@ -14,7 +15,39 @@ VOICE = os.environ.get("JARVIS_VOICE", "Tara")
 RATE = int(os.environ.get("JARVIS_VOICE_RATE", "190"))
 
 
+# Trello comments are written for reading, not speaking. macOS `say` reads
+# emoji aloud by their Unicode names, so a comment containing 🧪 ✅ → •
+# becomes "test tube", "white heavy check mark", "rightwards arrow",
+# "bullet" -- which is what "it talked another language" actually was.
+_SPEAKABLE = [
+    (re.compile(r"[\u2014\u2013]"), ", "),           # em/en dash -> a pause
+    (re.compile(r"\u2192|->"), " to "),              # arrows
+    (re.compile(r"[\u2018\u2019]"), "'"),            # smart quotes
+    (re.compile(r"[\u201c\u201d]"), ""),
+    # Before the markdown rule: that strips the "#" this one needs.
+    (re.compile(r"\[#(\d+)\]?"), r" ticket \1"),     # "[#399431]" reads as noise
+    (re.compile(r"[*_`#>|]+"), " "),                 # markdown scaffolding
+    (re.compile(r"https?://\S+"), " a link "),
+    # Anything left outside basic Latin: emoji, pictographs, box drawing.
+    (re.compile(r"[^\x00-\x7F]+"), " "),
+    (re.compile(r"\s+"), " "),
+]
+
+
+def speakable(text: str) -> str:
+    """Strip what a screen reads but a voice should not.
+
+    Emoji and pictographs are removed rather than transliterated: there is no
+    useful spoken form of 🧪 in the middle of a sentence about a carrier bug.
+    """
+    out = text or ""
+    for pattern, replacement in _SPEAKABLE:
+        out = pattern.sub(replacement, out)
+    return out.strip(" ,.;:-")
+
+
 def say(text: str) -> None:
+    text = speakable(text)
     if not text or not text.strip():
         return
     # `--` ends option parsing. Without it, spoken text beginning with a dash

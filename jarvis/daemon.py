@@ -1,9 +1,10 @@
 """The always-on process. Wires ears, router, workers, and voice together."""
 from __future__ import annotations
 
-import numpy as np
-
+import re
 import time
+
+import numpy as np
 
 from jarvis.dash.bus import BUS
 from jarvis.dash.server import Dashboard
@@ -39,6 +40,25 @@ MAX_TURNS = 12
 # mentions a domain but should stay put. Only these phrasings move the
 # sticky context.
 SWITCH_PHRASES = ("switch to", "use ", "jarvis,")
+
+
+_SUBJECT = re.compile(r"\b((?!MCSL\b)[A-Z]{2,6}-\d{1,5}|MCSL[\s-]?\d{2,4})\b", re.I)
+
+
+def _acknowledge(question: str) -> str:
+    """Say what is being fetched, not that a tool is running.
+
+    Naming the subject back is what makes it feel like an assistant rather than
+    a progress bar: "give me a minute, I'll get the details on ZI-687" tells you
+    it heard you correctly, before the answer arrives.
+    """
+    found = _SUBJECT.search(question or "")
+    if found:
+        return f"Ok boss, give me a minute — I'll get the details on {found.group(1).upper()}."
+    words = " ".join((question or "").split())
+    if words:
+        return f"Ok boss, give me a minute — looking into {words[:60]}."
+    return "Ok boss, give me a minute."
 
 
 class Jarvis:
@@ -307,7 +327,7 @@ class Jarvis:
             return busy
 
         BUS.publish("job", status="running", what=question)
-        working = Response(speech="Ok boss, fetching that now.", detail=question, tier=3)
+        working = Response(speech=_acknowledge(question), detail=question, tier=3)
         self._say(working)
         return working
 

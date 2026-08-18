@@ -421,3 +421,42 @@ def test_a_failed_summary_still_says_something_useful():
     j.worker.call.side_effect = RuntimeError("no api key")
     with patch("jarvis.daemon.speak"), patch("jarvis.daemon.time.sleep"):
         assert "could not summarise" in j._summarise("output", "q").lower()
+
+
+# --- the acknowledgement names what it is fetching ---
+
+def test_the_acknowledgement_names_the_card():
+    """Saying the subject back is what makes it an assistant rather than a
+    progress bar: you learn it heard you correctly before the answer lands."""
+    from jarvis.daemon import _acknowledge
+
+    said = _acknowledge("go through card ZI-687 and summarise the cutoff fix")
+    assert "ZI-687" in said
+    assert "minute" in said.lower()
+
+
+def test_the_acknowledgement_names_a_release():
+    from jarvis.daemon import _acknowledge
+
+    assert "MCSL 386" in _acknowledge("what's in MCSL 386 right now")
+
+
+def test_the_acknowledgement_falls_back_to_the_request():
+    from jarvis.daemon import _acknowledge
+
+    said = _acknowledge("create a GLS carrier store")
+    assert "GLS carrier store" in said
+
+
+def test_the_acknowledgement_survives_an_empty_request():
+    from jarvis.daemon import _acknowledge
+
+    assert _acknowledge("").strip() != ""
+
+
+def test_the_acknowledgement_names_no_mechanism():
+    from jarvis.daemon import _acknowledge
+
+    said = _acknowledge("go through card ZI-687").lower()
+    for banned in ("claude", "tier", "worker", "subprocess"):
+        assert banned not in said
