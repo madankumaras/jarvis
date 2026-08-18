@@ -159,3 +159,61 @@ def test_a_real_answer_is_not_mistaken_for_an_auth_failure(text):
     from jarvis.tier3 import looks_like_auth_failure
 
     assert looks_like_auth_failure(text) is False
+
+
+# --- the agentic run needs the context Jarvis already has ---
+
+def test_the_prompt_carries_the_card_under_discussion():
+    """Regression: "give me the AC for that card" arrived with only those words
+    and came back asking which card was meant -- while Jarvis knew."""
+    from jarvis.tier3 import build_prompt
+
+    prompt = build_prompt("give me the AC for that card", {"card": "ZI-667"})
+    assert "ZI-667" in prompt
+    assert "give me the AC for that card" in prompt
+
+
+def test_the_prompt_carries_repo_release_and_my_cards():
+    from jarvis.tier3 import build_prompt
+
+    prompt = build_prompt("what is left", {
+        "repo": "/x/MCSLDomainExpert",
+        "release": "SL MCSL 385",
+        "my_cards": ["ZI-667", "ZI-686"],
+    })
+    assert "/x/MCSLDomainExpert" in prompt
+    assert "SL MCSL 385" in prompt
+    assert "ZI-667, ZI-686" in prompt
+
+
+def test_the_prompt_asks_for_a_spoken_answer():
+    """Output is read aloud, and nobody is at the keyboard to answer a
+    follow-up question."""
+    from jarvis.tier3 import build_prompt
+
+    prompt = build_prompt("x", {"card": "ZI-1"}).lower()
+    assert "read aloud" in prompt
+    assert "no markdown" in prompt
+    assert "rather than asking a question" in prompt
+
+
+def test_no_context_leaves_the_request_untouched():
+    from jarvis.tier3 import build_prompt
+
+    assert build_prompt("create a store", None) == "create a store"
+    assert build_prompt("create a store", {}) == "create a store"
+
+
+def test_the_context_reaches_the_command(monkeypatch, tmp_path):
+    seen = {}
+
+    def fake_run(argv, **kw):
+        seen["argv"] = argv
+        raise RuntimeError("stop")
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    r = Tier3Runner(str(tmp_path))
+    done = []
+    r.start("give me the AC", done.append, context={"card": "ZI-667"})
+    assert _wait(lambda: done)
+    assert "ZI-667" in seen["argv"][-1]

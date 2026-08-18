@@ -500,3 +500,35 @@ def test_silence_on_the_first_turn_is_announced():
             np.zeros(16000, dtype=np.float32), _FakeCapture(), announce_silence=True
         )
     said.assert_called_once()
+
+
+def test_the_tier3_context_includes_what_the_conversation_knows():
+    j = _jarvis_with_fakes("give me the AC for that card")
+    j.conversation.last_card = "ZI-667"
+    j.worker.call.side_effect = None
+    j.worker.call.return_value = {
+        "release": "SL MCSL 385", "items": [{"id": "ZI-667", "actionable": True}],
+    }
+    ctx = j._tier3_context()
+    assert ctx["card"] == "ZI-667"
+    assert ctx["release"] == "SL MCSL 385"
+    assert ctx["my_cards"] == ["ZI-667"]
+
+
+def test_the_tier3_context_survives_a_failing_worker():
+    """A missing piece is better than a failed turn."""
+    j = _jarvis_with_fakes("x")
+    j.worker.call.side_effect = RuntimeError("worker down")
+    j.conversation.last_card = "ZI-686"
+    ctx = j._tier3_context()
+    assert ctx["card"] == "ZI-686"
+    assert "release" not in ctx
+
+
+def test_the_context_is_passed_when_a_job_starts():
+    j = _jarvis_with_fakes("create a store")
+    j.conversation.last_card = "ZI-667"
+    with patch("jarvis.daemon.speak"), patch("jarvis.daemon.time.sleep"):
+        j.handle_utterance(np.zeros(16000, dtype=np.float32), _FakeCapture())
+    kwargs = j.tier3.start.call_args.kwargs
+    assert kwargs["context"]["card"] == "ZI-667"

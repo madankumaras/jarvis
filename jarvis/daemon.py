@@ -343,7 +343,7 @@ class Jarvis:
             spoken = self._summarise(output, question)
             self._say(Response(speech=spoken, detail=output[:600], tier=3))
 
-        if not self.tier3.start(question, done):
+        if not self.tier3.start(question, done, context=self._tier3_context()):
             busy = Response(speech="Still working on the last one, boss.", ok=False)
             self._say(busy)
             return busy
@@ -352,6 +352,35 @@ class Jarvis:
         working = Response(speech=_acknowledge(question), detail=question, tier=3)
         self._say(working)
         return working
+
+    def _tier3_context(self) -> dict:
+        """What Jarvis already knows, handed to the agentic run.
+
+        Best effort: a missing piece is better than a failed turn.
+        """
+        ctx: dict = {}
+        try:
+            ctx["repo"] = self.manager._config(self.domain)["path"]
+        except Exception:
+            pass
+        if self.conversation.last_card:
+            ctx["card"] = self.conversation.last_card
+        if self.conversation.last_person:
+            ctx["person"] = self.conversation.last_person
+        try:
+            active = self.worker.call("active_release")
+            if active.get("release"):
+                ctx["release"] = active["release"]
+        except Exception:
+            pass
+        try:
+            items = self.worker.call("my_work").get("items", [])
+            mine = [i["id"] for i in items if i.get("actionable")]
+            if mine:
+                ctx["my_cards"] = mine
+        except Exception:
+            pass
+        return ctx
 
     def _summarise(self, output: str, question: str = "") -> str:
         """Condense job output into something worth hearing aloud.

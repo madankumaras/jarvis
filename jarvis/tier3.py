@@ -54,6 +54,42 @@ def _permission_args() -> list[str]:
     return ["--allowedTools", allow]
 
 
+def build_prompt(request: str, context: dict | None = None) -> str:
+    """Give the agentic run the context Jarvis already has.
+
+    Without this it received only the bare utterance, so "give me the AC" or
+    "go through that card" arrived with nothing to act on and came back asking
+    which card was meant -- while Jarvis knew perfectly well.
+    """
+    ctx = context or {}
+    lines: list[str] = []
+
+    if ctx.get("repo"):
+        lines.append(f"You are in {ctx['repo']}. Use this repo's skills and docs.")
+    if ctx.get("release"):
+        lines.append(f"Active release: {ctx['release']}.")
+    if ctx.get("card"):
+        lines.append(f"The card under discussion is {ctx['card']} — assume this one unless told otherwise.")
+    if ctx.get("my_cards"):
+        lines.append("Cards assigned to me: " + ", ".join(ctx["my_cards"]) + ".")
+    if ctx.get("person"):
+        lines.append(f"Person last mentioned: {ctx['person']}.")
+
+    if not lines:
+        return request
+
+    lines.append("")
+    lines.append(
+        "Answer for a voice assistant to read aloud: lead with the answer, keep "
+        "it to a few sentences, no markdown. If you genuinely cannot resolve "
+        "something, say what is missing in one line rather than asking a "
+        "question — nobody is at the keyboard to answer it."
+    )
+    lines.append("")
+    lines.append(f"Request: {request}")
+    return "\n".join(lines)
+
+
 class Tier3Runner:
     """Runs one job at a time, on a background thread."""
 
@@ -66,7 +102,12 @@ class Tier3Runner:
     def busy(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
-    def start(self, text: str, on_done: Callable[[str], None]) -> bool:
+    def start(
+        self,
+        text: str,
+        on_done: Callable[[str], None],
+        context: dict | None = None,
+    ) -> bool:
         """Begin a job. Returns False if one is already running.
 
         Never raises: a failed spawn is reported through on_done like any
@@ -75,7 +116,8 @@ class Tier3Runner:
         if self.busy:
             return False
 
-        argv = self.command or ["claude", *_permission_args(), "-p", text]
+        prompt = build_prompt(text, context)
+        argv = self.command or ["claude", *_permission_args(), "-p", prompt]
 
         def run() -> None:
             try:
