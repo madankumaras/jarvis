@@ -475,4 +475,5 @@ def test_an_expired_session_is_reported_not_summarised():
     assert "sign-in has expired" in spoken.speech
     assert "claude login" in spoken.speech
     assert spoken.ok is False
-    summarised.assert_not_called(), "must not summarise an auth error into an answer"
+    # A bare `assert_not_called(), "msg"` builds a tuple and checks nothing.
+    assert summarised.call_count == 0, "must not summarise an auth error into an answer"
