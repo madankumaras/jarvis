@@ -25,11 +25,18 @@ _CARD_REF = (
 
 
 def _card_params(m: re.Match[str]) -> dict:
-    """Bare numbers get the ZI prefix: the board's cards are all ZI-NNN."""
-    explicit = m.groupdict().get("card")
-    if explicit:
-        return {"card_id": explicit}
-    return {"card_id": f"ZI-{m.group('cardnum')}"}
+    """Bare numbers get the ZI prefix: the board's cards are all ZI-NNN.
+
+    Returns an empty card_id when the utterance named no card at all -- "who is
+    the dev for that" is valid, and the reference is resolved from conversation
+    state before this point.
+    """
+    groups = m.groupdict()
+    if groups.get("card"):
+        return {"card_id": groups["card"]}
+    if groups.get("cardnum"):
+        return {"card_id": f"ZI-{groups['cardnum']}"}
+    return {"card_id": ""}
 
 
 def _no_params(m: re.Match[str]) -> dict:
@@ -76,6 +83,14 @@ def _body_params(m: re.Match[str]) -> dict:
 
 def _person_params(m: re.Match[str]) -> dict:
     return {"person": m.group("person").strip()}
+
+
+def _app_params(m: re.Match[str]) -> dict:
+    return {"app": m.group("app").strip(" .?")}
+
+
+def _channel_params(m: re.Match[str]) -> dict:
+    return {"channel": m.group("channel").strip("# "), "text": m.group("body").strip()}
 
 
 def _release_params(m: re.Match[str]) -> dict:
@@ -155,6 +170,56 @@ INTENTS: list[Intent] = [
             re.I,
         ),
         extract=lambda m: {"person": (m.group("person") or m.group("person2") or m.group("person3") or "").strip()},
+    ),
+    Intent(
+        name="post_channel",
+        method="post_channel",
+        # "post in qa-team saying the toggle is off",
+        # "comment in #mcsl-qa that ZI-667 is verified"
+        # A channel post is not a DM. send_dm's pattern needs a person before
+        # the "saying", so "post in qa-team saying ..." cannot match it -- but
+        # the distinction matters enough to test rather than assume.
+        pattern=re.compile(
+            r"\b(?:post|comment|write)\b[^.]{0,20}?\bin\s+#?(?P<channel>[a-z0-9][a-z0-9._-]{1,40})\s+"
+            r"(?:saying|to say|that|:)\s+(?P<body>.+)$",
+            re.I,
+        ),
+        extract=_channel_params,
+    ),
+    Intent(
+        name="open_app",
+        method="__local__",
+        # "open slack", "launch vs code", "open the terminal"
+        pattern=re.compile(
+            r"\b(?:open|launch|start|bring up)\s+(?P<app>[A-Za-z][A-Za-z0-9 .+-]{1,30})$",
+            re.I,
+        ),
+        extract=_app_params,
+    ),
+    Intent(
+        name="card_devs",
+        method="card_devs",
+        # "who is the dev for that", "who is working on ZI-667"
+        # Before card_status, which would otherwise answer with the list and
+        # assignee when the question is specifically about people.
+        pattern=re.compile(
+            rf"\b(?:who(?:'?s| is| are)?)\b.{{0,30}}?"
+            rf"\b(?:dev|developer|devs|working on|assigned|owner)\b"
+            rf"(?:.{{0,30}}?{_CARD_REF})?",
+            re.I,
+        ),
+        extract=_card_params,
+    ),
+    Intent(
+        name="test_plan",
+        method="test_plan",
+        # "what is the testing plan for that", "test cases for ZI-667"
+        pattern=re.compile(
+            rf"\b(?:test(?:ing)?\s+(?:plan|cases?|scenarios?)|tcs?|test\s+plan)\b"
+            rf"(?:.{{0,30}}?{_CARD_REF})?",
+            re.I,
+        ),
+        extract=_card_params,
     ),
     Intent(
         name="card_status",

@@ -1,3 +1,4 @@
+from unittest.mock import patch
 import pytest
 
 from jarvis.router.core import handle_transcript
@@ -531,3 +532,74 @@ def test_no_spoken_string_anywhere_names_the_plumbing(vocab):
     assert resp.ok is False
     for term in banned:
         assert term not in resp.speech.lower(), f"leaked: {term}"
+
+
+# --- dev, test plan, apps, channel posts ---
+
+WIDE = REPLY_METHODS + ("my_release_cards", "card_devs", "test_plan", "post_channel")
+
+
+def test_who_is_the_dev_resolves_the_card_from_context(vocab):
+    from jarvis.router.conversation import Conversation
+
+    c = Conversation()
+    w = FakeWorker(methods=WIDE)
+    handle_transcript("status of ZI-667", vocab, w, conversation=c)
+    handle_transcript("who is the dev for that", vocab, w, conversation=c)
+
+    assert w.calls[-1] == ("card_devs", {"card_id": "ZI-667"})
+
+
+def test_asking_about_the_dev_with_no_card_in_context_asks_which(vocab):
+    from jarvis.router.conversation import Conversation
+
+    w = FakeWorker(methods=WIDE)
+    resp = handle_transcript("who is the dev for that", vocab, w, conversation=Conversation())
+    assert resp.ok is False
+    assert "which card" in resp.speech.lower()
+    assert w.calls == []
+
+
+def test_the_testing_plan_routes_with_the_remembered_card(vocab):
+    from jarvis.router.conversation import Conversation
+
+    c = Conversation()
+    w = FakeWorker(methods=WIDE)
+    handle_transcript("status of ZI-667", vocab, w, conversation=c)
+    handle_transcript("what is the testing plan for that", vocab, w, conversation=c)
+
+    assert w.calls[-1] == ("test_plan", {"card_id": "ZI-667"})
+
+
+def test_a_channel_post_is_read_back_and_not_sent(vocab):
+    w = FakeWorker(methods=WIDE)
+    resp = handle_transcript("post in qa-team saying ZI-667 is verified", vocab, w)
+
+    assert resp.needs_confirm is True
+    assert "qa-team" in resp.speech
+    assert "ZI-667 is verified" in resp.speech
+    assert not any(c[0] == "post_channel" for c in w.calls), "must not post before consent"
+    assert resp.pending.params == {"channel": "qa-team", "text": "ZI-667 is verified"}
+
+
+def test_a_channel_post_is_not_routed_as_a_dm(vocab):
+    """Quietly sending a channel message to a person would be worse than
+    failing outright."""
+    w = FakeWorker(methods=WIDE)
+    resp = handle_transcript("post in mcsl-qa that the toggle is off", vocab, w)
+    assert resp.pending.method == "post_channel"
+
+
+def test_opening_an_app_needs_no_confirmation(vocab):
+    """Launching an app is reversible with a click, unlike a Slack message."""
+    w = FakeWorker(methods=WIDE)
+    with patch("jarvis.apps.open_app", return_value=(True, "Opening Slack.")):
+        resp = handle_transcript("open slack", vocab, w)
+    assert resp.needs_confirm is False
+    assert w.calls == [], "opening an app is local, not a worker call"
+
+
+def test_an_unknown_app_is_reported(vocab):
+    w = FakeWorker(methods=WIDE)
+    resp = handle_transcript("open nonsense", vocab, w)
+    assert resp.ok is False

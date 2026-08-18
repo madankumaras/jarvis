@@ -73,7 +73,11 @@ No microphone handy? The same pipeline works typed:
 | "remind me to check ZI-653 at 4" | fires at 16:00, survives a restart |
 | "note that the GLS store needs re-toggling" | remembered |
 | "DM Ashok saying the toggle is off" | read back, waits for "ok" |
-| anything else | handed to Claude Code in that repo |
+| "who is the dev for that" | Trello members plus whether a PR is open |
+| "what is the testing plan for that" | the generated test cases for that ticket |
+| "open slack" / "launch vs code" | launches the app |
+| "post in qa-team saying ..." | read back, waits for "ok" |
+| anything else | handed off, summarised, and read back to you |
 
 Jarvis also speaks unprompted: due reminders, new Zendesk issues, cards added
 to the current release, and replies to DMs it sent. Nothing is announced

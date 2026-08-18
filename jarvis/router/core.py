@@ -89,6 +89,14 @@ def _handle(
         return _tier3(result.text, tier3)
 
     intent, params = matched
+
+    # "who is the dev for that" names no card. Fill it from what was just
+    # discussed, and ask rather than guess when there is nothing.
+    if "card_id" in params and not params["card_id"]:
+        if conversation is None or not conversation.last_card:
+            return Response(speech="Which card do you mean?", ok=False)
+        params["card_id"] = conversation.last_card
+
     if conversation is not None:
         conversation.remember(intent.name, params)
 
@@ -120,6 +128,8 @@ def _handle(
     # run after an explicit spoken yes.
     if intent.name == "send_dm":
         return _build_dm(params, worker)
+    if intent.name == "post_channel":
+        return _build_post(params)
 
     try:
         payload = worker.call(intent.method, **params)
@@ -192,6 +202,12 @@ def _fill_slot(text: str, conversation: Conversation, worker: Worker) -> Respons
 def _memory(name: str, params: dict, store, domain: str) -> Response:
     """Tasks and notes. Writes here need no confirmation — they are local,
     private, and trivially undone, unlike a Slack message."""
+    if name == "open_app":
+        from jarvis.apps import open_app
+
+        ok, said = open_app(params["app"])
+        return Response(speech=said, ok=ok)
+
     if store is None:
         return Response(speech="Memory isn't set up yet.", ok=False)
 
@@ -206,6 +222,12 @@ def _memory(name: str, params: dict, store, domain: str) -> Response:
         if due and due.date() != datetime.now().date():
             when = f" tomorrow at {due.strftime('%H:%M')}"
         return Response(speech=f"Noted — {body}{when}.", detail=raw)
+
+    if name == "open_app":
+        from jarvis.apps import open_app
+
+        ok, said = open_app(params["app"])
+        return Response(speech=said, ok=ok)
 
     if name == "add_note":
         store.add_note(params["text"], domain=domain)
@@ -222,6 +244,27 @@ def _memory(name: str, params: dict, store, domain: str) -> Response:
         )
 
     return Response(speech="I don't know how to do that yet.", ok=False)
+
+
+def _build_post(params: dict) -> Response:
+    """A channel post is seen by everyone in it, so it is read back like a DM.
+
+    No recipient to resolve -- Slack rejects an unknown channel itself, and
+    guessing at a channel name would be worse than reporting the failure.
+    """
+    channel, body = params["channel"], params["text"]
+    speech = f"Posting in {channel}: {body}. Ok?"
+    return Response(
+        speech=speech,
+        detail=f"#{channel}: {body}",
+        needs_confirm=True,
+        pending=PendingAction(
+            method="post_channel",
+            params={"channel": channel, "text": body},
+            speech=speech,
+            detail=body,
+        ),
+    )
 
 
 def _build_dm(params: dict, worker: Worker) -> Response:

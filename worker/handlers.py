@@ -312,6 +312,90 @@ def customer_issues() -> dict[str, Any]:
     return {"speech": speech, "detail": detail}
 
 
+def _find_card(client, card_id: str):
+    """Locate a card by its ZI id across the release lists. Returns raw dict."""
+    token = card_id.upper()
+    for lst in _release_lists(client):
+        for raw in _raw_cards(client, lst.id, fields="name,desc,idMembers"):
+            if token in raw.get("name", "").upper():
+                return raw, lst
+    return None, None
+
+
+def card_devs(card_id: str) -> dict[str, Any]:
+    """Who is working on a card.
+
+    Trello members plus the PR link from the description -- the PR is usually
+    the most direct answer to "who is the dev", since a card carries the whole
+    squad as members but only the author opens the pull request.
+    """
+    client = _trello()
+    raw, lst = _find_card(client, card_id)
+    if raw is None:
+        return {"speech": f"Couldn't find {card_id} in the current releases.", "detail": ""}
+
+    people = [
+        m.get("fullName") or m.get("username", "")
+        for m in client.get_card_members(raw["id"])
+    ]
+    prs = re.findall(r"https?://\S*?(?:bitbucket|github)\S*?pull-?requests?/\d+", raw.get("desc", ""))
+
+    if not people and not prs:
+        return {"speech": f"Nobody is assigned to {card_id}.", "detail": ""}
+
+    if people and prs:
+        speech = f"{card_id} has {', '.join(people)} on it, and a pull request open."
+    elif people:
+        speech = f"{card_id} has {', '.join(people)} on it."
+    else:
+        speech = f"{card_id} has nobody assigned, but a pull request is open."
+    return {
+        "speech": speech,
+        "detail": f"{raw.get('name','')}\nMembers: {', '.join(people)}\nPRs: {chr(10).join(prs)}",
+    }
+
+
+def test_plan(card_id: str) -> dict[str, Any]:
+    """The generated test cases for a card.
+
+    These are produced by the AC/TC pipeline into output/<release>/<ZI>/tc.md,
+    so this reads what the team already generated rather than inventing a plan.
+    """
+    from pathlib import Path
+
+    token = card_id.upper()
+    root = Path.cwd() / "output"
+    if not root.is_dir():
+        return {"speech": "No generated test plans on disk.", "detail": ""}
+
+    hits = sorted(root.glob(f"*/{token}/tc.md")) or sorted(root.glob(f"*/{token}*/tc.md"))
+    if not hits:
+        return {"speech": f"No test plan generated for {card_id} yet.", "detail": ""}
+
+    body = hits[0].read_text(errors="ignore")
+    titles = re.findall(r"^###\s*(TC-\d+):\s*(.+)$", body, re.M)
+    if not titles:
+        return {"speech": f"Found a test plan for {card_id} but no numbered cases.", "detail": body[:1500]}
+
+    label = "case" if len(titles) == 1 else "cases"
+    head = "; ".join(f"{n} {t[:70]}" for n, t in titles[:3])
+    extra = f", and {len(titles) - 3} more" if len(titles) > 3 else ""
+    return {
+        "speech": f"{len(titles)} test {label} for {card_id}. {head}{extra}.",
+        "detail": body[:4000],
+    }
+
+
+def post_channel(channel: str, text: str) -> dict[str, Any]:
+    """Post to a Slack channel. Only ever called after an explicit spoken yes."""
+    if not (text or "").strip():
+        raise ValueError("refusing to post an empty message")
+    client = _slack()
+    target = channel if channel.startswith(("#", "C")) else f"#{channel}"
+    client.post_to_channel(text, channel=target)
+    return {"speech": f"Posted to {target}.", "detail": f"{target}: {text}"}
+
+
 def zendesk_latest() -> dict[str, Any]:
     """The newest Zendesk intake file and the ZI ids it introduced.
 
@@ -464,6 +548,9 @@ HANDLERS = {
     "resolve_person": resolve_person,
     "send_dm": send_dm,
     "read_replies": read_replies,
+    "card_devs": card_devs,
+    "test_plan": test_plan,
+    "post_channel": post_channel,
     "zendesk_latest": zendesk_latest,
     "release_card_ids": release_card_ids,
     "summarise": summarise,
