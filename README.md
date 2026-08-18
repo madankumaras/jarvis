@@ -120,9 +120,19 @@ JARVIS_TIER3_ALLOW=all                                # bypass all checks
 `all` lets a misheard sentence modify anything in the target repo, unattended.
 That is why it is opt-in.
 
-Troubleshooting: `JARVIS_WAKE_DEBUG=1` prints the peak, noise floor and
-threshold for every loud chunk; `JARVIS_STT_DEBUG=1` prints the confidence of
-every rejected transcript.
+Troubleshooting:
+
+```bash
+JARVIS_WAKE_DEBUG=1     # peak, noise floor and threshold for every loud chunk
+JARVIS_STT_DEBUG=1      # confidence of every rejected transcript
+JARVIS_SPEECH_DEBUG=1   # the exact string handed to `say`
+```
+
+That last one exists because "it spoke another language" turned out to be two
+separate things, both readable rather than guessable: emoji in Trello comments
+(macOS `say` reads 🧪 as "test tube") and code identifiers (`bkg_ref_id` read
+as "bkg ref id"). Both are now rewritten before speaking — the first removed,
+the second expanded to "booking reference I D".
 
 Anything that leaves your machine — a Slack DM, a store creation — is read back
 to you and waits for an explicit "ok". Anything that is not a bare affirmative

@@ -13,6 +13,9 @@ from jarvis.types import Response
 # Indian English voice pronounces them correctly where en_GB mangles them.
 VOICE = os.environ.get("JARVIS_VOICE", "Tara")
 RATE = int(os.environ.get("JARVIS_VOICE_RATE", "190"))
+# JARVIS_SPEECH_DEBUG=1 prints the exact string handed to `say`, so "it spoke
+# another language" can be read rather than guessed at.
+DEBUG_SPEECH = bool(os.environ.get("JARVIS_SPEECH_DEBUG"))
 
 
 # Trello comments are written for reading, not speaking. macOS `say` reads
@@ -41,6 +44,43 @@ _SPEAKABLE = [
 ]
 
 
+# Code identifiers are everywhere in these cards, and every TTS reads them as
+# noise -- "bkg_ref_id" becomes "bkg ref id", which in an Indian English voice
+# lands somewhere between gibberish and another language. Expanded to the words
+# a person would actually say.
+_ABBREV = {
+    "bkg": "booking", "ref": "reference", "id": "I D", "ids": "I Ds",
+    "qty": "quantity", "addr": "address", "cfg": "config", "env": "environment",
+    "req": "request", "res": "response", "auth": "auth", "api": "A P I",
+    "url": "U R L", "uuid": "U U ID", "csv": "C S V", "json": "jason",
+    "sku": "S K U", "hs": "H S", "eta": "E T A", "sla": "S L A",
+    "pr": "P R", "qa": "Q A", "tc": "test case", "ac": "acceptance criteria",
+}
+
+_CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+_ACRONYM = re.compile(r"\b([A-Z]{2,4})\b")
+_WORD = re.compile(r"[A-Za-z]+")
+
+
+def _expand_identifiers(text: str) -> str:
+    """Make code-shaped tokens pronounceable.
+
+    Three passes: split camelCase into words, expand known abbreviations, and
+    space out short all-caps acronyms so they are read as letters rather than
+    attempted as words. Longer all-caps strings are left alone -- they are
+    usually pronounceable, and spelling out eight letters is worse.
+    """
+    out = _CAMEL.sub(" ", text)
+
+    def _word(m: re.Match[str]) -> str:
+        w = m.group(0)
+        return _ABBREV.get(w.lower(), w)
+
+    out = _WORD.sub(_word, out)
+    # After abbreviation expansion, so "API" is not spaced twice.
+    return _ACRONYM.sub(lambda m: " ".join(m.group(1)), out)
+
+
 def speakable(text: str) -> str:
     """Strip what a screen reads but a voice should not.
 
@@ -50,7 +90,8 @@ def speakable(text: str) -> str:
     out = text or ""
     for pattern, replacement in _SPEAKABLE:
         out = pattern.sub(replacement, out)
-    return out.strip(" ,.;:-")
+    out = _expand_identifiers(out)
+    return re.sub(r"\s+", " ", out).strip(" ,.;:-")
 
 
 def say(text: str) -> None:
@@ -61,6 +102,8 @@ def say(text: str) -> None:
     # is read as a flag and `say` refuses the whole utterance:
     #   say -v Daniel "-x hello"  ->  say: invalid option -- x
     # Trello titles and comments routinely start with "-".
+    if DEBUG_SPEECH:
+        print(f"  [say] {text!r}", flush=True)
     subprocess.run(["say", "-v", VOICE, "-r", str(RATE), "--", text], check=False)
 
 

@@ -222,3 +222,53 @@ def test_say_skips_text_that_sanitises_to_nothing():
     with patch("subprocess.run") as run:
         sp.say("🧪 ✅ •")
     run.assert_not_called()
+
+
+# --- code identifiers were read as gibberish ---
+
+@pytest.mark.parametrize("raw,expected_in", [
+    ("bkg_ref_id missing", "booking reference I D"),
+    ("pickup_dropoff_office_id", "pickup dropoff office I D"),
+    ("isInsuranceRequired = false", "is Insurance Required"),
+    ("payment_mode hardcoded to QR", "Q R"),
+    ("the api returned", "A P I"),
+    ("check the sku field", "S K U"),
+])
+def test_identifiers_are_made_pronounceable(raw, expected_in):
+    """Every TTS reads "bkg_ref_id" as noise, and in an Indian English voice it
+    lands somewhere between gibberish and another language."""
+    from jarvis.voice.speak import speakable
+
+    assert expected_in in speakable(raw)
+
+
+def test_camel_case_is_split_into_words():
+    from jarvis.voice.speak import speakable
+
+    assert speakable("isInsuranceRequired") == "is Insurance Required"
+
+
+def test_a_long_all_caps_token_is_left_alone():
+    """Spelling out eight letters is worse than attempting the word."""
+    from jarvis.voice.speak import speakable
+
+    assert "PARSPL" in speakable("24_SPP_PARSPL service code")
+
+
+def test_ordinary_words_are_untouched():
+    from jarvis.voice.speak import speakable
+
+    said = speakable("India Post label prints undiscounted product price")
+    assert said == "India Post label prints undiscounted product price"
+
+
+def test_expansion_does_not_double_space_an_acronym():
+    from jarvis.voice.speak import speakable
+
+    assert "A  P  I" not in speakable("the API is slow")
+
+
+def test_whitespace_is_collapsed_after_expansion():
+    from jarvis.voice.speak import speakable
+
+    assert "  " not in speakable("bkg_ref_id  __  payment_mode")
