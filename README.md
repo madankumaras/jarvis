@@ -120,6 +120,23 @@ JARVIS_TIER3_ALLOW=all                                # bypass all checks
 `all` lets a misheard sentence modify anything in the target repo, unattended.
 That is why it is opt-in.
 
+### When a job hits a problem
+
+`claude -p` is one-shot: by the time you hear about a problem the run has
+already exited, so its question cannot be answered in place. Jarvis classifies
+how a job ended and responds differently to each:
+
+| Ending | What you hear |
+|---|---|
+| an answer | the summary, then "what do you want to do?" |
+| **blocked on a permission** | "that job is blocked on a permission I don't have. It needs `<tool>`. Widen JARVIS_TIER3_ALLOW." |
+| **it asked you something** | the question — and your next sentence **re-runs the job carrying your answer** |
+| **sign-in expired** | "run claude login in a terminal and ask me again" |
+
+Only the first is treated as a result. Reading the others out as though they
+were answers is how Jarvis once spoke "what do you want to do?", heard itself,
+and started another job.
+
 Troubleshooting:
 
 ```bash

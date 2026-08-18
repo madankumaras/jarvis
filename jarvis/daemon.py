@@ -79,6 +79,9 @@ class Jarvis:
         self.store = Store()
         self.busy = False          # true while a turn is being handled
         self.conversation = Conversation()
+        # Set when a job ended by asking something. The next utterance is the
+        # answer, and the job is re-run carrying it.
+        self._pending_question: str = ""
         self.listener = WakeListener(self._on_wake)
         self.dash = Dashboard()
         self.listener.on_level = self._publish_level
@@ -201,6 +204,20 @@ class Jarvis:
             return quiet
 
         BUS.publish("turn", who="you", text=text)
+
+        # A job asked something and then exited. This utterance is the answer,
+        # so re-run the original request carrying it rather than routing it as
+        # a fresh command.
+        if getattr(self, "_pending_question", ""):
+            from jarvis.tier3 import with_answer
+
+            original, self._pending_question = self._pending_question, ""
+            retry = Response(
+                speech="Ok boss, carrying on with that.",
+                detail=with_answer(original, text),
+                tier=3,
+            )
+            return self._run_tier3(retry)
 
         target = self.manager.resolve_alias(text) if text else None
         if target and target != self.domain and any(p in text.lower() for p in SWITCH_PHRASES):
@@ -328,16 +345,40 @@ class Jarvis:
             print(f"\n  [job finished] {head}", flush=True)
             BUS.publish("job", status="finished", what=question)
 
+            from jarvis.tier3 import AUTH, BLOCKED, QUESTION, blocked_tool, classify_outcome
+
+            outcome = classify_outcome(output)
+
             # An expired session is not an answer. Summarising it produced a
             # spoken "your session has expired, what do you want to do?", which
             # the mic then heard and turned into another request.
-            from jarvis.tier3 import looks_like_auth_failure
-
-            if looks_like_auth_failure(output):
+            if outcome == AUTH:
                 self._say(Response(
                     speech="I can't run that — your Claude sign-in has expired. "
                            "Run claude login in a terminal and ask me again.",
                     detail=output[:600], tier=3, ok=False,
+                ))
+                return
+
+            if outcome == BLOCKED:
+                tool = blocked_tool(output)
+                named = f" It needs {tool.split()[0]}." if tool else ""
+                self._say(Response(
+                    speech=f"Boss, that job is blocked on a permission I don't have.{named} "
+                           "Widen JARVIS_TIER3_ALLOW and ask me again.",
+                    detail=output[:600], tier=3, ok=False,
+                ))
+                return
+
+            if outcome == QUESTION:
+                # The run has already exited, so its question cannot be answered
+                # in place. Ask it, keep the original request, and re-run with
+                # the answer supplied.
+                self._pending_question = question
+                summary = self._summarise(output, question)
+                self._say(Response(
+                    speech=f"{summary} Tell me and I'll carry on.",
+                    detail=output[:600], tier=3, awaiting=True,
                 ))
                 return
 

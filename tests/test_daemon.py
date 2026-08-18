@@ -36,6 +36,7 @@ def _jarvis_with_fakes(transcript, worker_result=None):
     from jarvis.router.conversation import Conversation
     j.conversation = Conversation()
     j.dash = MagicMock()
+    j._pending_question = ""
     from jarvis.watch.scheduler import Scheduler
     j.scheduler = Scheduler()
     return j
@@ -532,3 +533,72 @@ def test_the_context_is_passed_when_a_job_starts():
         j.handle_utterance(np.zeros(16000, dtype=np.float32), _FakeCapture())
     kwargs = j.tier3.start.call_args.kwargs
     assert kwargs["context"]["card"] == "ZI-667"
+
+
+# --- what happens when a job hits a problem ---
+
+def _finish_job_with(j, output):
+    """Drive a turn to tier 3, then hand the job the given output.
+
+    The utterance must be one that actually falls through -- "go through card
+    ZI-687" is answered at tier 1 and never starts a job.
+    """
+    with patch("jarvis.daemon.speak"), patch("jarvis.daemon.time.sleep"):
+        j.handle_utterance(np.zeros(16000, dtype=np.float32), _FakeCapture())
+        assert j.tier3.start.call_args is not None, "no job was started"
+        callback = j.tier3.start.call_args[0][1]
+        with patch.object(j, "_say") as said:
+            callback(output)
+    return said.call_args[0][0]
+
+
+def test_a_blocked_job_names_the_permission_and_the_fix():
+    j = _jarvis_with_fakes("summarise the cutoff fix for me please")
+    spoken = _finish_job_with(j, (
+        "I hit a permission gate trying to query Trello "
+        "(`skills/mcsl-trello-operator/scripts/trello_ops.py search`) — "
+        "it needs your approval to run."
+    ))
+    assert "blocked" in spoken.speech.lower()
+    assert "JARVIS_TIER3_ALLOW" in spoken.speech
+    assert spoken.ok is False
+
+
+def test_a_job_that_asks_something_leaves_the_question_pending():
+    """The run has exited, so its question cannot be answered in place. Jarvis
+    asks, keeps the original request, and re-runs carrying the answer."""
+    j = _jarvis_with_fakes("summarise the cutoff fix for me please")
+    with patch.object(j, "_summarise", return_value="Which card do you mean?"):
+        spoken = _finish_job_with(j, "Could you share the card ID?")
+    assert spoken.awaiting is True
+    assert "carry on" in spoken.speech.lower()
+    assert j._pending_question, "the original request must be kept"
+
+
+def test_the_next_utterance_answers_a_pending_question_and_reruns():
+    j = _jarvis_with_fakes("ZI-667")
+    j._pending_question = "give me the AC for that card"
+    with patch("jarvis.daemon.speak"), patch("jarvis.daemon.time.sleep"):
+        resp = j.handle_utterance(np.zeros(16000, dtype=np.float32), _FakeCapture())
+
+    assert resp.tier == 3
+    prompt = j.tier3.start.call_args[0][0]
+    assert "give me the AC for that card" in prompt
+    assert "ZI-667" in prompt
+    assert j._pending_question == "", "the question must be cleared after answering"
+
+
+def test_a_pending_question_does_not_capture_a_later_turn():
+    j = _jarvis_with_fakes("status of ZI-691")
+    j._pending_question = ""
+    with patch("jarvis.daemon.speak"), patch("jarvis.daemon.time.sleep"):
+        j.handle_utterance(np.zeros(16000, dtype=np.float32), _FakeCapture())
+    assert any(c[0] == "card_status" for c in j.worker.calls)
+
+
+def test_a_successful_job_is_just_summarised():
+    j = _jarvis_with_fakes("summarise the cutoff fix for me please")
+    with patch.object(j, "_summarise", return_value="Ten scenarios written."):
+        spoken = _finish_job_with(j, "The AC for ZI-667 is already generated.")
+    assert "Ten scenarios written." in spoken.speech
+    assert spoken.ok is True

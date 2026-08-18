@@ -253,8 +253,13 @@ INTENTS: list[Intent] = [
         name="open_app",
         method="__local__",
         # "open slack", "launch vs code", "open the terminal"
+        #
+        # (?!a\b|an\b) because "open a PR" is not a request to launch an app
+        # called "a PR". "the" is allowed: "open the terminal" is how it is
+        # actually said, and resolve() strips the article.
         pattern=re.compile(
-            r"\b(?:open|launch|start|bring up)\s+(?P<app>[A-Za-z][A-Za-z0-9 .+-]{1,30})$",
+            r"\b(?:open|launch|start|bring up)\s+(?!a\b|an\b)"
+            r"(?P<app>[A-Za-z][A-Za-z0-9 .+-]{1,30})$",
             re.I,
         ),
         extract=_app_params,

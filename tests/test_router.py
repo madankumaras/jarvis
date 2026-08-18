@@ -705,3 +705,23 @@ def test_a_real_request_still_reaches_the_agentic_path(vocab):
     w = FakeWorker(methods=WIDE)
     resp = handle_transcript("create a GLS carrier store with full env", vocab, w)
     assert resp.tier == 3
+
+
+def test_open_a_pr_is_not_an_app_launch(vocab):
+    """"open a PR" would otherwise try to launch an application called "a PR"."""
+    w = FakeWorker(methods=WIDE)
+    resp = handle_transcript("summarise the fix and open a PR", vocab, w)
+    assert resp.tier == 3
+
+
+@pytest.mark.parametrize("said,app", [
+    ("open slack", "slack"),
+    ("open the terminal", "the terminal"),
+    ("launch vs code", "vs code"),
+])
+def test_real_app_launches_still_match(vocab, said, app):
+    from jarvis.router.intents import match
+
+    m = match(said)
+    assert m is not None and m[0].name == "open_app"
+    assert m[1]["app"] == app

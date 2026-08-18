@@ -31,6 +31,66 @@ _AUTH_FAILED = re.compile(
 def looks_like_auth_failure(output: str) -> bool:
     return bool(_AUTH_FAILED.search(output or ""))
 
+
+# A job can end in four ways, and only one of them is an answer. Patterns taken
+# from real output in a live session.
+_BLOCKED = re.compile(
+    r"needs? your (?:approval|permission)|permission gate|"
+    r"could you approve|requires? approval|not permitted|"
+    r"i (?:do not|don't) have permission",
+    re.I,
+)
+_ASKS = re.compile(
+    r"\?\s*$|could you (?:clarify|tell me|share|confirm)|"
+    r"which (?:one|card|file|store) do you mean|"
+    r"(?:can|could) you (?:provide|specify)|what would you like",
+    re.I,
+)
+
+OK, AUTH, BLOCKED, QUESTION = "ok", "auth", "blocked", "question"
+
+
+def classify_outcome(output: str) -> str:
+    """What kind of ending this was.
+
+    Only OK is an answer. The other three all need something from the user, and
+    `claude -p` has already exited by the time we know -- so each needs a
+    different response rather than being read out as though it were a result.
+    """
+    text = (output or "").strip()
+    if not text:
+        return OK
+    if _AUTH_FAILED.search(text):
+        return AUTH
+    if _BLOCKED.search(text):
+        return BLOCKED
+    if _ASKS.search(text):
+        return QUESTION
+    return OK
+
+
+_TOOL = re.compile(r"`([^`]{3,80})`")
+
+
+def blocked_tool(output: str) -> str:
+    """The command it could not run, if it named one in backticks."""
+    found = _TOOL.search(output or "")
+    return found.group(1) if found else ""
+
+
+def with_answer(request: str, answer: str) -> str:
+    """Re-ask the same request carrying the user's answer.
+
+    There is no way to reply into a finished `claude -p` run, so continuing a
+    blocked job means asking again with the missing piece supplied.
+    """
+    return (
+        f"{request}\n\n"
+        f"The user was asked a question about this and answered: {answer}\n"
+        "Use that answer and continue. Do not ask again -- if it is still not "
+        "enough, say in one line what is missing."
+    )
+
 # `claude -p` is non-interactive: it cannot show a permission prompt, so
 # anything needing approval simply stalls and reports back asking for it.
 # Observed in a real session: "This command needs your approval to run (it

@@ -217,3 +217,63 @@ def test_the_context_reaches_the_command(monkeypatch, tmp_path):
     r.start("give me the AC", done.append, context={"card": "ZI-667"})
     assert _wait(lambda: done)
     assert "ZI-667" in seen["argv"][-1]
+
+
+# --- a job can end in four ways, and only one is an answer ---
+
+REAL = {
+    "blocked": (
+        "I hit a permission gate trying to query Trello "
+        "(`skills/mcsl-trello-operator/scripts/trello_ops.py search --query \"ZI-687\"`) "
+        "— it needs your approval to run since it hits the live Trello API."
+    ),
+    "question": (
+        "I don't have a specific Trello card loaded in this conversation yet — "
+        "could you share the card ID?"
+    ),
+    "auth": "Failed to authenticate: OAuth session expired and could not be refreshed",
+    "ok": "The AC for ZI-667 is already generated. Ten acceptance criteria scenarios.",
+}
+
+
+@pytest.mark.parametrize("expected,output", list(REAL.items()))
+def test_real_outputs_classify_correctly(expected, output):
+    """Every one of these came back from a real job in a live session."""
+    from jarvis.tier3 import classify_outcome
+
+    assert classify_outcome(output) == expected
+
+
+def test_empty_output_is_not_a_question():
+    from jarvis.tier3 import classify_outcome
+
+    assert classify_outcome("") == "ok"
+    assert classify_outcome(None) == "ok"
+
+
+def test_the_blocked_tool_is_named_when_the_output_names_it():
+    from jarvis.tier3 import blocked_tool
+
+    assert "trello_ops.py" in blocked_tool(REAL["blocked"])
+
+
+def test_no_backticks_means_no_tool_named():
+    from jarvis.tier3 import blocked_tool
+
+    assert blocked_tool("it needs your approval") == ""
+
+
+def test_an_answer_ending_in_a_question_mark_is_a_question():
+    """A run that finishes by asking cannot be replied to -- it has exited."""
+    from jarvis.tier3 import classify_outcome
+
+    assert classify_outcome("Which store should I check?") == "question"
+
+
+def test_with_answer_carries_the_original_request_and_the_reply():
+    from jarvis.tier3 import with_answer
+
+    prompt = with_answer("give me the AC for that card", "ZI-667")
+    assert "give me the AC for that card" in prompt
+    assert "ZI-667" in prompt
+    assert "do not ask again" in prompt.lower()
