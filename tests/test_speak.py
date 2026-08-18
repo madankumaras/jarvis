@@ -1,3 +1,6 @@
+import os
+
+import pytest
 from unittest.mock import patch
 
 from jarvis.types import Response
@@ -78,3 +81,61 @@ def test_greeting_addresses_the_user_and_offers_help():
 
 def test_greeting_uses_the_current_time_when_none_given():
     assert "how can I help you?" in greeting()
+
+
+# --- voice selection ---
+
+def test_the_voice_and_rate_come_from_the_environment():
+    """Set JARVIS_VOICE / JARVIS_VOICE_RATE rather than editing code."""
+    import importlib
+
+    import jarvis.voice.speak as sp
+
+    original = (sp.VOICE, sp.RATE)
+    try:
+        os.environ["JARVIS_VOICE"] = "Rishi"
+        os.environ["JARVIS_VOICE_RATE"] = "165"
+        importlib.reload(sp)
+        assert sp.VOICE == "Rishi"
+        assert sp.RATE == 165
+    finally:
+        os.environ.pop("JARVIS_VOICE", None)
+        os.environ.pop("JARVIS_VOICE_RATE", None)
+        importlib.reload(sp)
+        assert (sp.VOICE, sp.RATE) == original
+
+
+def test_the_configured_voice_is_passed_to_say():
+    import jarvis.voice.speak as sp
+
+    with patch("subprocess.run") as run:
+        sp.say("hello")
+    argv = run.call_args[0][0]
+    assert argv[argv.index("-v") + 1] == sp.VOICE
+    assert argv[argv.index("-r") + 1] == str(sp.RATE)
+
+
+def test_novelty_voices_are_excluded():
+    """`say -v ?` mixes real synthesisers with voices that sing or buzz."""
+    from jarvis.voice.voices import english_voices
+
+    names = {n for n, _ in english_voices()}
+    for joke in ("Zarvox", "Bubbles", "Bells", "Trinoids", "Whisper"):
+        assert joke not in names
+
+
+def test_indian_english_voices_are_listed_first():
+    """The accent of the voice should match the accent speaking to it."""
+    from jarvis.voice.voices import english_voices
+
+    voices = english_voices()
+    if not any(loc == "en_IN" for _, loc in voices):
+        pytest.skip("no en_IN voices installed on this machine")
+    assert voices[0][1] == "en_IN"
+
+
+def test_no_duplicate_voices():
+    from jarvis.voice.voices import english_voices
+
+    names = [n for n, _ in english_voices()]
+    assert len(names) == len(set(names))

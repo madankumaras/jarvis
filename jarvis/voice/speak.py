@@ -1,12 +1,17 @@
 """macOS speech and notifications. Both are free and local."""
 from __future__ import annotations
 
+import os
 import subprocess
 
 from jarvis.types import Response
 
-VOICE = "Daniel"  # swap for any voice in `say -v '?'`
-RATE = 190
+# Any installed macOS voice: `.venv/bin/python -m jarvis.voice.voices` lists
+# the usable ones and reads a sample in each. Indian English voices (Rishi,
+# Aman, Tara) tend to sit better than the en_GB default for Indian-accented
+# input, because the pronunciation of names and place words matches.
+VOICE = os.environ.get("JARVIS_VOICE", "Daniel")
+RATE = int(os.environ.get("JARVIS_VOICE_RATE", "190"))
 
 
 def say(text: str) -> None:
