@@ -53,3 +53,25 @@ def test_existing_digits_pass_through_untouched():
 )
 def test_trailing_whitespace_after_a_run_is_preserved(spoken, expected):
     assert normalize_numbers(spoken) == expected
+
+
+# --- "oh" is only zero inside a digit string ---
+
+@pytest.mark.parametrize("said", ["oh", "oh right", "oh dear", "oh no", "oh ok"])
+def test_a_lone_oh_stays_a_word(said):
+    """Regression: "oh" mapped to 0 unconditionally, so "oh right" became
+    "0 right" -- which no longer looked like filler and started an agentic job."""
+    assert normalize_numbers(said) == said
+
+
+@pytest.mark.parametrize("said,expected", [
+    ("six oh seven", "607"),
+    ("four oh four", "404"),
+    ("oh one two", "012"),
+])
+def test_oh_is_zero_beside_other_digits(said, expected):
+    assert normalize_numbers(said) == expected
+
+
+def test_oh_in_a_sentence_with_a_real_number_elsewhere():
+    assert normalize_numbers("oh, check ZI six five three") == "oh, check ZI 653"

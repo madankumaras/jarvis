@@ -186,12 +186,20 @@ class Jarvis:
         self.worker = self.manager.get(target)
         self.vocab = self._load_vocab()
 
-    def handle_utterance(self, audio: np.ndarray, capture=None) -> Response:
+    def handle_utterance(
+        self, audio: np.ndarray, capture=None, announce_silence: bool = True
+    ) -> Response:
         self._publish_state("thinking", "working on it")
         text = self.transcriber.transcribe(audio, self.vocab)
         print(f"  heard: {text!r}", flush=True)
-        if text:
-            BUS.publish("turn", who="you", text=text)
+
+        if not text.strip():
+            quiet = Response(speech="Didn't catch that.", ok=False)
+            if announce_silence:
+                self._say(quiet)
+            return quiet
+
+        BUS.publish("turn", who="you", text=text)
 
         target = self.manager.resolve_alias(text) if text else None
         if target and target != self.domain and any(p in text.lower() for p in SWITCH_PHRASES):
@@ -378,11 +386,17 @@ class Jarvis:
                 print(f"  listening ({window:.0f}s)...", flush=True)
                 self._publish_state("listening", "go ahead, boss")
                 capture.drain()
-                response = self.handle_utterance(capture.record(window), capture)
+
+                # Silence after an answer just means the conversation is over.
+                # Announcing "Didn't catch that" every time the follow-up window
+                # expires is noise -- it fired four times in one session.
+                announce_silence = turn == 0
+                response = self.handle_utterance(
+                    capture.record(window), capture, announce_silence=announce_silence
+                )
 
                 if response.ends:
                     break
-                # Silence closes the conversation; anything else keeps it open.
                 if not response.ok and "didn't catch" in response.speech.lower():
                     break
                 # A question Jarvis asked deserves a full window for the answer.

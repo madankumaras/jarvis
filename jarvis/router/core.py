@@ -1,6 +1,7 @@
 """handle_transcript — the seam the entire product is tested through."""
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Protocol
 
@@ -71,7 +72,7 @@ def _handle(
             return Response(speech="Ok.", ok=True)
 
         if conversation.unresolved_reference(text):
-            return Response(speech="Which card do you mean?", ok=False)
+            return _which_card(worker)
         text = conversation.resolve(text)
 
     result = correct(text, vocab)
@@ -94,7 +95,7 @@ def _handle(
     # discussed, and ask rather than guess when there is nothing.
     if "card_id" in params and not params["card_id"]:
         if conversation is None or not conversation.last_card:
-            return Response(speech="Which card do you mean?", ok=False)
+            return _which_card(worker)
         params["card_id"] = conversation.last_card
 
     if conversation is not None:
@@ -160,6 +161,29 @@ def _handle(
         speech=payload.get("speech", ""),
         detail=payload.get("detail", ""),
         tier=1,
+    )
+
+
+def _which_card(worker: Worker) -> Response:
+    """Ask which card, naming the candidates.
+
+    "Which card do you mean?" is a dead end when the mishear was the id itself
+    ("the card 6-0"). Offering the cards actually in front of you turns it into
+    a question that can be answered.
+    """
+    try:
+        items = (worker.call("my_work") or {}).get("items", [])
+        ids = [i["id"] for i in items if i.get("actionable")][:4]
+    except Exception:
+        ids = []
+    if not ids:
+        return Response(speech="Which card do you mean?", ok=False)
+    if len(ids) == 1:
+        return Response(speech=f"Do you mean {ids[0]}?", ok=False)
+    return Response(
+        speech="Which one — " + ", ".join(ids[:-1]) + f" or {ids[-1]}?",
+        detail=", ".join(ids),
+        ok=False,
     )
 
 
@@ -304,12 +328,49 @@ def _build_dm(params: dict, worker: Worker) -> Response:
     )
 
 
+# Words that are conversation, not a request. "Why?" started a real job and
+# spent a minute on a one-word prompt.
+_FILLER = {
+    "why", "what", "how", "who", "when", "where", "huh", "hmm", "uh", "um",
+    "sorry", "pardon", "again", "really", "sure", "and", "so", "then",
+    "hello", "hi", "hey", "jarvis", "please", "wait",
+    # Acknowledgements. A bare yes/no is caught earlier by interpret(), but
+    # "ok then" is neither a bare affirmative nor a request.
+    "ok", "okay", "yeah", "yep", "yes", "no", "nope", "nah", "thanks", "right",
+    "good", "fine", "cool", "alright", "well", "hm", "eh", "oh",
+}
+
+
+def _too_thin_for_work(text: str) -> bool:
+    """True when there is not enough in the utterance to act on.
+
+    An agentic run costs a minute or more; a one-word question cannot carry
+    enough intent to be worth that, and the answer comes back confusing.
+    """
+    words = [w for w in re.findall(r"[a-z0-9']+", (text or "").lower()) if w]
+    if not words:
+        return True
+    if len(words) <= 2 and all(w in _FILLER for w in words):
+        return True
+    return len(words) < 2
+
+
 def _tier3(text: str, tier3) -> Response:
     """Hand off to the agentic path.
+
+    The thin-utterance guard lives here rather than at the call site: tier 3 is
+    reached both when nothing matched AND when a matched intent's method is
+    missing from the worker, and "oh right" slipped through the second path.
 
     The speech deliberately names no mechanism: "Claude Code" is plumbing, not
     something an assistant says out loud.
     """
+    if _too_thin_for_work(text):
+        return Response(
+            speech="Sorry boss, I didn't follow — what would you like?",
+            detail=text,
+            ok=False,
+        )
     if tier3 is None:
         return Response(speech="Ok boss, fetching that now.", detail=text, tier=3)
     return tier3(text)

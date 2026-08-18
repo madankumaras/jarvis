@@ -7,9 +7,14 @@ from __future__ import annotations
 import re
 
 _UNITS = {
-    "zero": 0, "oh": 0, "one": 1, "two": 2, "three": 3, "four": 4,
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4,
     "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
 }
+# "oh" means zero only when read as part of a digit string ("six oh seven").
+# On its own it is an ordinary word, and mapping it unconditionally turned
+# "oh right" into "0 right" -- which then looked like a real request and
+# started an agentic job.
+_CONTEXTUAL = {"oh": 0}
 _TEENS = {
     "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
     "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19,
@@ -20,7 +25,7 @@ _TENS = {
 }
 _SCALES = {"hundred": 100, "thousand": 1000}
 
-_NUMBER_WORDS = set(_UNITS) | set(_TEENS) | set(_TENS) | set(_SCALES)
+_NUMBER_WORDS = set(_UNITS) | set(_TEENS) | set(_TENS) | set(_SCALES) | set(_CONTEXTUAL)
 
 
 def _eval_arithmetic(words: list[str]) -> str:
@@ -37,7 +42,7 @@ def _eval_arithmetic(words: list[str]) -> str:
         elif w in _TEENS:
             current += _TEENS[w]
         else:
-            current += _UNITS[w]
+            current += _UNITS.get(w, _CONTEXTUAL.get(w, 0))
     return str(total + current)
 
 
@@ -57,7 +62,7 @@ def _eval_concatenated(words: list[str]) -> str:
         elif w in _TEENS:
             parts.append(str(_TEENS[w]))
         else:
-            parts.append(str(_UNITS[w]))
+            parts.append(str(_UNITS.get(w, _CONTEXTUAL.get(w, 0))))
         i += 1
     return "".join(parts)
 
@@ -80,9 +85,14 @@ def normalize_numbers(text: str) -> str:
     pending_ws = ""
 
     def flush() -> None:
-        if run:
+        if not run:
+            return
+        # A contextual word alone is not a number: "oh" on its own stays "oh".
+        if all(w in _CONTEXTUAL for w in run):
+            out.append(" ".join(run))
+        else:
             out.append(_eval_run(run))
-            run.clear()
+        run.clear()
 
     for tok in tokens:
         low = tok.lower()

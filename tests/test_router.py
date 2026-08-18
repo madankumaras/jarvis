@@ -551,13 +551,41 @@ def test_who_is_the_dev_resolves_the_card_from_context(vocab):
 
 
 def test_asking_about_the_dev_with_no_card_in_context_asks_which(vocab):
+    """It asks, and names the candidates it can see -- "Which card do you
+    mean?" is a dead end when the mishear was the id itself."""
     from jarvis.router.conversation import Conversation
 
-    w = FakeWorker(methods=WIDE)
+    w = FakeWorker(methods=WIDE + ("my_work",))
+    w.results = {"my_work": {"speech": "", "detail": "", "items": [
+        {"id": "ZI-667", "actionable": True},
+        {"id": "ZI-686", "actionable": True},
+        {"id": "ZI-632", "actionable": False},
+    ]}}
     resp = handle_transcript("who is the dev for that", vocab, w, conversation=Conversation())
+
     assert resp.ok is False
+    assert "ZI-667" in resp.speech and "ZI-686" in resp.speech
+    assert "ZI-632" not in resp.speech, "a done card is not a candidate"
+    assert not any(c[0] == "card_devs" for c in w.calls)
+
+
+def test_asking_which_card_falls_back_when_there_are_no_candidates(vocab):
+    from jarvis.router.conversation import Conversation
+
+    w = FakeWorker(methods=WIDE + ("my_work",))
+    w.results = {"my_work": {"speech": "", "detail": "", "items": []}}
+    resp = handle_transcript("who is the dev for that", vocab, w, conversation=Conversation())
     assert "which card" in resp.speech.lower()
-    assert w.calls == []
+
+
+def test_a_single_candidate_is_offered_directly(vocab):
+    from jarvis.router.conversation import Conversation
+
+    w = FakeWorker(methods=WIDE + ("my_work",))
+    w.results = {"my_work": {"speech": "", "detail": "", "items": [
+        {"id": "ZI-667", "actionable": True}]}}
+    resp = handle_transcript("go through that card", vocab, w, conversation=Conversation())
+    assert "ZI-667" in resp.speech
 
 
 def test_the_testing_plan_routes_with_the_remembered_card(vocab):
@@ -660,3 +688,20 @@ def test_a_named_release_still_wins_over_the_bare_question(vocab):
     w.results = {"my_release_cards": {"speech": "none", "detail": "", "ids": []}}
     handle_transcript("my tickets in 386", vocab, w)
     assert w.calls[0][0] == "my_release_cards"
+
+
+def test_a_filler_word_never_starts_a_job(vocab):
+    """Regression: "Why?" fell through and spent a minute running a one-word
+    prompt. An agentic run is too expensive for an utterance that carries no
+    intent."""
+    for said in ("Why?", "what", "hmm", "ok then", "hey jarvis"):
+        w = FakeWorker(methods=WIDE)
+        resp = handle_transcript(said, vocab, w)
+        assert resp.tier != 3, f"{said!r} started a job"
+        assert resp.ok is False
+
+
+def test_a_real_request_still_reaches_the_agentic_path(vocab):
+    w = FakeWorker(methods=WIDE)
+    resp = handle_transcript("create a GLS carrier store with full env", vocab, w)
+    assert resp.tier == 3

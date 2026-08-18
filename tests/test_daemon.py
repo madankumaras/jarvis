@@ -477,3 +477,26 @@ def test_an_expired_session_is_reported_not_summarised():
     assert spoken.ok is False
     # A bare `assert_not_called(), "msg"` builds a tuple and checks nothing.
     assert summarised.call_count == 0, "must not summarise an auth error into an answer"
+
+
+def test_silence_after_an_answer_ends_the_conversation_quietly():
+    """Regression: "Didn't catch that" was spoken every time the follow-up
+    window expired -- four times in one session. Silence just means the
+    conversation is over."""
+    j = _jarvis_with_fakes("")
+    with patch("jarvis.daemon.speak"), patch.object(j, "_say") as said:
+        resp = j.handle_utterance(
+            np.zeros(16000, dtype=np.float32), _FakeCapture(), announce_silence=False
+        )
+    assert resp.ok is False
+    said.assert_not_called()
+
+
+def test_silence_on_the_first_turn_is_announced():
+    """You woke it and said nothing -- that deserves an answer."""
+    j = _jarvis_with_fakes("")
+    with patch("jarvis.daemon.speak"), patch.object(j, "_say") as said:
+        j.handle_utterance(
+            np.zeros(16000, dtype=np.float32), _FakeCapture(), announce_silence=True
+        )
+    said.assert_called_once()
