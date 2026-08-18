@@ -435,11 +435,16 @@ def release_card_ids() -> dict[str, Any]:
 
     newest = releases[0]
     ids: list[str] = []
+    titles: dict[str, str] = {}
     for raw in _raw_cards(client, newest.id, fields="name"):
-        token = _short(raw.get("name", ""))
+        name = raw.get("name", "")
+        token = _short(name)
         if re.fullmatch(r"[A-Z]{2,4}-\d{1,5}", token):
             ids.append(token)
-    return {"release": newest.name, "ids": sorted(set(ids))}
+            # "From SL: ZI-691 - Title [#399431]" -> "Title"
+            after = name.split("\u2014", 1)[-1] if "\u2014" in name else name
+            titles[token] = re.sub(r"\s*\[#\d+\]\s*$", "", after).strip()
+    return {"release": newest.name, "ids": sorted(set(ids)), "titles": titles}
 
 
 def summarise(text: str, question: str = "") -> dict[str, Any]:

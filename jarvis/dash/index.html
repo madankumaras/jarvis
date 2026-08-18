@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Jarvis — HUD mockup</title>
+<title>Jarvis</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -146,11 +146,12 @@ mark{background:rgba(63,208,255,.14);color:var(--cy-hot);padding:0 4px;border:1p
   <header class="bar">
     <div class="brand">JARVIS</div>
     <div class="sep"></div>
-    <div class="chip">domain <b>mcsl</b></div>
-    <div class="chip">wake <b>hey jarvis</b></div>
-    <div class="chip">voice <b>Tara</b></div>
+    <div class="chip">domain <b id="mDomain">—</b></div>
+    <div class="chip">wake <b id="mWake">—</b></div>
+    <div class="chip">voice <b id="mVoice">—</b></div>
     <div class="right">
       <div class="chip">uptime <b id="up">04:12:38</b></div>
+      <div class="chip" id="conn" style="color:var(--ink-faint)">connecting</div>
       <div class="chip" id="stateChip">idle</div>
       <div class="dot"></div>
     </div>
@@ -183,7 +184,7 @@ mark{background:rgba(63,208,255,.14);color:var(--cy-hot);padding:0 4px;border:1p
       <div class="readout">
         <div class="state-name" id="stateName">standby</div>
         <div class="state-line" id="stateLine">listening for “hey jarvis”</div>
-        <div class="level" id="lvl">peak 0.006 · floor 0.006 · needs 0.250</div>
+        <div class="level" id="lvl">waiting for the daemon…</div>
       </div>
     </div>
   </section>
@@ -192,163 +193,161 @@ mark{background:rgba(63,208,255,.14);color:var(--cy-hot);padding:0 4px;border:1p
   <section class="panel">
     <h2>Context</h2>
     <div class="body">
-      <div class="kv"><span>release</span><b>MCSL 385</b></div>
-      <div class="kv"><span>assigned to you</span><b>3 / 29</b></div>
-      <div class="kv"><span>open ZI issues</span><b>10</b></div>
-      <div class="kv"><span>reminders</span><b>1 overdue</b></div>
+      <div class="kv"><span>release</span><b id="cRelease">—</b></div>
+      <div class="kv"><span>assigned to you</span><b id="cMine">—</b></div>
+      <div class="kv"><span>open ZI issues</span><b id="cIssues">—</b></div>
+      <div class="kv"><span>reminders</span><b id="cReminders">—</b></div>
       <h2 style="padding-left:0;padding-top:16px">Your tickets</h2>
-      <div class="tick mine"><i></i><code>ZI-667</code><em>Canpar declared_value surcharge</em></div>
-      <div class="tick mine"><i></i><code>ZI-686</code><em>India Post bkg_ref_id on label</em></div>
-      <div class="tick mine"><i></i><code>ZI-687</code><em>Cutoff time not applied</em></div>
+      <div id="cTickets"></div>
       <h2 style="padding-left:0;padding-top:16px">Watchers</h2>
       <div id="cards"></div>
     </div>
   </section>
 
   <!-- job -->
-  <section class="job" id="job">
+  <section class="job done" id="job">
     <div>
-      <div class="head">Background job <span class="pill" id="jobPill">running</span></div>
-      <div class="what" id="jobWhat">go through card ZI-687 and summarise the cutoff-time fix</div>
+      <div class="head">Background job <span class="pill" id="jobPill">idle</span></div>
+      <div class="what" id="jobWhat">nothing running</div>
     </div>
-    <div class="elapsed" id="jobTime">00:42</div>
+    <div class="elapsed" id="jobTime">00:00</div>
     <div class="track"></div>
   </section>
 
 </div>
 
 <script>
-/* ---- tick marks around the dial ---- */
+/* ---- tick marks ---- */
 const ticks = document.getElementById('ticks');
 for (let i = 0; i < 72; i++) {
   const a = (i / 72) * Math.PI * 2, long = i % 6 === 0;
   const r1 = long ? 172 : 180, r2 = 190;
-  const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-  l.setAttribute('x1', 200 + Math.cos(a) * r1); l.setAttribute('y1', 200 + Math.sin(a) * r1);
-  l.setAttribute('x2', 200 + Math.cos(a) * r2); l.setAttribute('y2', 200 + Math.sin(a) * r2);
-  l.setAttribute('class', 'ring-tick'); l.setAttribute('opacity', long ? .6 : .22);
+  const l = document.createElementNS('http://www.w3.org/2000/svg','line');
+  l.setAttribute('x1',200+Math.cos(a)*r1); l.setAttribute('y1',200+Math.sin(a)*r1);
+  l.setAttribute('x2',200+Math.cos(a)*r2); l.setAttribute('y2',200+Math.sin(a)*r2);
+  l.setAttribute('class','ring-tick'); l.setAttribute('opacity', long ? .6 : .22);
   ticks.appendChild(l);
 }
 
-/* ---- amplitude bars: THIS is the mic level, not decoration ---- */
-const N = 64, bars = document.getElementById('bars'), lines = [];
+/* ---- amplitude ring: driven by the daemon's real mic peak ---- */
+const N = 64, barsG = document.getElementById('bars'), lines = [];
 for (let i = 0; i < N; i++) {
-  const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-  bars.appendChild(l); lines.push(l);
+  const l = document.createElementNS('http://www.w3.org/2000/svg','line');
+  barsG.appendChild(l); lines.push(l);
 }
-function drawBars(amp) {
+let amp = 0, target = 0, t = 0;
+function draw() {
+  t = performance.now();
+  amp += (target - amp) * 0.22;                 /* smooth only the render */
+  const a0 = Math.max(0, Math.min(1, amp));
   for (let i = 0; i < N; i++) {
     const a = (i / N) * Math.PI * 2 - Math.PI / 2;
-    const jitter = 0.35 + 0.65 * Math.abs(Math.sin(i * 12.9898 + perf * 0.004));
-    const len = 8 + amp * 52 * jitter;
-    const r1 = 110, r2 = r1 + len;
-    lines[i].setAttribute('x1', 200 + Math.cos(a) * r1);
-    lines[i].setAttribute('y1', 200 + Math.sin(a) * r1);
-    lines[i].setAttribute('x2', 200 + Math.cos(a) * r2);
-    lines[i].setAttribute('y2', 200 + Math.sin(a) * r2);
-    lines[i].setAttribute('opacity', 0.25 + amp * 0.75);
+    const jitter = 0.35 + 0.65 * Math.abs(Math.sin(i * 12.9898 + t * 0.004));
+    const r1 = 110, r2 = r1 + 8 + a0 * 52 * jitter;
+    lines[i].setAttribute('x1',200+Math.cos(a)*r1); lines[i].setAttribute('y1',200+Math.sin(a)*r1);
+    lines[i].setAttribute('x2',200+Math.cos(a)*r2); lines[i].setAttribute('y2',200+Math.sin(a)*r2);
+    lines[i].setAttribute('opacity', 0.25 + a0 * 0.75);
   }
+  requestAnimationFrame(draw);
 }
+requestAnimationFrame(draw);
 
-/* ---- state machine, mirroring the real daemon ---- */
-const STATES = {
-  idle:      { name:'standby',   line:'listening for “hey jarvis”', colour:'var(--idle)'   },
-  listening: { name:'listening', line:'go ahead, boss',             colour:'var(--listen)' },
-  thinking:  { name:'working',   line:'fetching that now',          colour:'var(--think)'  },
-  speaking:  { name:'speaking',  line:'',                           colour:'var(--speak)'  },
-};
-const root = document.documentElement;
+/* ---- state ---- */
+const COLOURS = { idle:'var(--idle)', listening:'var(--listen)', thinking:'var(--think)', speaking:'var(--speak)' };
+const NAMES   = { idle:'standby', listening:'listening', thinking:'working', speaking:'speaking' };
 function setState(s, line) {
-  const st = STATES[s];
-  root.style.setProperty('--state', st.colour);
-  document.getElementById('stateName').textContent = st.name;
-  document.getElementById('stateLine').textContent = line || st.line;
+  document.documentElement.style.setProperty('--state', COLOURS[s] || COLOURS.idle);
+  document.getElementById('stateName').textContent = NAMES[s] || s;
   document.getElementById('stateChip').textContent = s;
+  if (line) document.getElementById('stateLine').textContent = line;
 }
 
 /* ---- transcript ---- */
 const stream = document.getElementById('stream');
-function turn(who, html, corrected) {
+const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+/* Box anything id-shaped so a snapped correction is visible at a glance. */
+const markIds = s => esc(s).replace(/\b(?:[A-Z]{2,6}-\d{1,5}|MCSL[ -]?\d{2,4})\b/g, m => `<mark>${m}</mark>`);
+function turn(who, text, corrected) {
+  if (!text) return;
   const d = document.createElement('div');
   d.className = 'turn ' + (who === 'you' ? 'you' : 'jar');
-  d.innerHTML = `<div class="who"><span>${who === 'you' ? 'madan' : 'jarvis'}</span>
-      <span style="color:var(--ink-faint)">${new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span></div>
-    <div class="said">${html}</div>${corrected ? `<div class="corrected">${corrected}</div>` : ''}`;
+  const clock = new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  d.innerHTML = `<div class="who"><span>${who === 'you' ? 'you' : 'jarvis'}</span>
+      <span style="color:var(--ink-faint)">${clock}</span></div>
+    <div class="said">${markIds(text)}</div>` +
+    (corrected ? `<div class="corrected">${esc(corrected)}</div>` : '');
   stream.appendChild(d); stream.scrollTop = stream.scrollHeight;
-  while (stream.children.length > 14) stream.removeChild(stream.firstChild);
+  while (stream.children.length > 40) stream.removeChild(stream.firstChild);
 }
 
 /* ---- watcher cards ---- */
-const cards = document.getElementById('cards');
+const cardsEl = document.getElementById('cards');
 function card(kind, title, msg) {
   const d = document.createElement('div');
   d.className = 'card' + (kind === 'alert' ? ' alert' : '');
-  d.innerHTML = `<div class="t">${title}</div><div class="m">${msg}</div>`;
-  cards.prepend(d);
-  while (cards.children.length > 3) cards.removeChild(cards.lastChild);
+  d.innerHTML = `<div class="t">${esc(title)}</div><div class="m">${markIds(msg)}</div>`;
+  cardsEl.prepend(d);
+  while (cardsEl.children.length > 6) cardsEl.removeChild(cardsEl.lastChild);
 }
 
-/* ---- the scripted demo, timed like a real conversation ---- */
-let perf = 0, amp = 0, target = 0;
-const script = [
-  [   0, () => { setState('idle'); }],
-  [1800, () => { setState('listening','go ahead, boss'); target = .55; }],
-  [2400, () => turn('you','in <mark>MCSL 385</mark> how many tickets assigned to me',
-                    '<s>in muscle three eighty five…</s> → snapped to MCSL-385')],
-  [3600, () => { setState('thinking'); target = .06; }],
-  [4600, () => { setState('speaking'); target = .30;
-                 turn('jar','3 tickets assigned to you in SL MCSL 385: <mark>ZI-667</mark>, <mark>ZI-686</mark>, <mark>ZI-687</mark>'); }],
-  [7200, () => { setState('listening'); target = .5; }],
-  [7800, () => turn('you','who is the dev for <mark>that</mark>','“that” → ZI-667 from context')],
-  [8600, () => { setState('speaking'); target = .28;
-                 turn('jar','ZI-667 has vaibhav, Madan Kumar AS on it, and a pull request open.'); }],
-  [11000,() => { setState('listening'); target = .52; }],
-  [11600,() => turn('you','go through card <mark>ZI-687</mark> and summarise the cutoff-time fix')],
-  [12400,() => { setState('thinking'); target = .05;
-                 document.getElementById('job').classList.remove('done');
-                 document.getElementById('jobPill').textContent = 'running';
-                 jobStart = perf; jobRunning = true; }],
-  [14000,() => card('info','trello · 10 min ago','ZI-701 added to SL MCSL 386')],
-  [18000,() => card('alert','reminder · due','check the GLS packaging store')],
-  [22000,() => { jobRunning = false;
-                 document.getElementById('job').classList.add('done');
-                 document.getElementById('jobPill').textContent = 'finished';
-                 setState('speaking'); target = .32;
-                 turn('jar','The cutoff fix is merged and ready for QA on the Canada Post lane. What do you want to do?'); }],
-  [26000,() => card('info','slack · 2 min ago','Ashok Kumar replied: “toggle is on now”')],
-  [28000,() => { setState('idle'); target = .03; }],
-];
-let cursor = 0, jobStart = 0, jobRunning = false;
-
-function frame(t) {
-  perf = t;
-  while (cursor < script.length && t >= script[cursor][0]) script[cursor++][1]();
-  if (cursor >= script.length && t > 31000) { cursor = 0; perf = 0; stream.innerHTML = ''; requestAnimationFrame(() => {}); }
-
-  /* bursty approach to target, the way speech actually behaves */
-  const burst = target > .1 ? (Math.random() * .5 + .5) : 1;
-  amp += ((target * burst) - amp) * .16;
-  drawBars(Math.max(0, amp));
-
-  const peak = (0.006 + amp * 4.2).toFixed(3);
-  document.getElementById('lvl').textContent = `peak ${peak} · floor 0.006 · needs 0.250`;
-
-  if (jobRunning) {
-    const s = Math.floor((t - jobStart) / 1000);
-    document.getElementById('jobTime').textContent =
-      `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
-  }
-  requestAnimationFrame(frame);
-}
-requestAnimationFrame(frame);
-
-/* uptime ticker */
-let up = 4*3600 + 12*60 + 38;
+/* ---- job strip ---- */
+const jobEl = document.getElementById('job');
+let jobStart = 0, jobRunning = false;
 setInterval(() => {
-  up++;
-  const h = Math.floor(up/3600), m = Math.floor(up%3600/60), s = up%60;
+  if (!jobRunning) return;
+  const s = Math.floor((Date.now() - jobStart) / 1000);
+  document.getElementById('jobTime').textContent =
+    `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+}, 500);
+
+/* ---- context rail ---- */
+function context(d) {
+  const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.textContent = v; };
+  set('cRelease', d.release); set('cMine', d.mine); set('cIssues', d.issues); set('cReminders', d.reminders);
+  if (Array.isArray(d.tickets)) {
+    document.getElementById('cTickets').innerHTML = d.tickets.map(x =>
+      `<div class="tick mine"><i></i><code>${esc(x.id)}</code><em>${esc(x.title)}</em></div>`).join('');
+  }
+}
+
+/* ---- the stream ---- */
+const conn = document.getElementById('conn');
+function connect() {
+  const es = new EventSource('/events');
+  es.onopen  = () => { conn.textContent = 'live'; conn.style.color = 'var(--listen)'; };
+  es.onerror = () => { conn.textContent = 'reconnecting'; conn.style.color = 'var(--alert)'; };
+
+  es.addEventListener('state', e => { const d = JSON.parse(e.data); setState(d.state, d.line); });
+  es.addEventListener('level', e => {
+    const d = JSON.parse(e.data);
+    target = Math.max(0, Math.min(1, Number(d.norm) || 0));
+    document.getElementById('lvl').textContent =
+      `peak ${Number(d.peak).toFixed(3)} · floor ${Number(d.floor).toFixed(3)} · needs ${Number(d.needs).toFixed(3)}`;
+  });
+  es.addEventListener('turn',  e => { const d = JSON.parse(e.data); turn(d.who, d.text, d.corrected); });
+  es.addEventListener('card',  e => { const d = JSON.parse(e.data); card(d.level, d.title, d.message); });
+  es.addEventListener('context', e => context(JSON.parse(e.data)));
+  es.addEventListener('job', e => {
+    const d = JSON.parse(e.data);
+    document.getElementById('jobWhat').textContent = d.what || '—';
+    document.getElementById('jobPill').textContent = d.status || 'idle';
+    if (d.status === 'running') { jobRunning = true; jobStart = Date.now(); jobEl.classList.remove('done'); }
+    else { jobRunning = false; jobEl.classList.add('done'); }
+  });
+  es.addEventListener('meta', e => {
+    const d = JSON.parse(e.data);
+    const set = (id,v) => { const el = document.getElementById(id); if (el && v) el.textContent = v; };
+    set('mDomain', d.domain); set('mWake', d.wake); set('mVoice', d.voice);
+  });
+}
+connect();
+
+/* uptime, counted locally from first paint */
+const t0 = Date.now();
+setInterval(() => {
+  const s = Math.floor((Date.now() - t0) / 1000);
   document.getElementById('up').textContent =
-    `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    `${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor(s%3600/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
 }, 1000);
 </script>
 </body>

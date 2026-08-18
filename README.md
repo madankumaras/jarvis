@@ -53,6 +53,28 @@ matters more than it sounds like it should. **`Tara` (en_IN) is the default.**
 `Tessa` (en_ZA) are also available. Rate is words per minute; 190 is the
 default, 165 is calmer.
 
+### Dashboard
+
+A live HUD opens in your browser the first time Jarvis wakes, at
+http://127.0.0.1:8777/ — then stays where you put it and simply updates. Every
+animated element is a real signal, not decoration:
+
+| On screen | Source |
+|---|---|
+| amplitude ring | the mic peak the wake detector already computes |
+| ring colour | idle / listening / working / speaking |
+| transcript, ids boxed | what was heard, after correction |
+| job timer | the background job's elapsed time |
+| cards sliding in | watcher announcements |
+
+Server-Sent Events over stdlib HTTP, bound to localhost only — the transcript of
+everything you say has no business being reachable from the network. If the
+port is taken the dashboard is skipped and Jarvis keeps listening.
+
+```bash
+JARVIS_DASH_PORT=9001   # if 8777 clashes
+```
+
 No microphone handy? The same pipeline works typed:
 
 ```bash

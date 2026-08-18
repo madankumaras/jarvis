@@ -192,6 +192,10 @@ class WakeListener:
         self.use_clap = True if use_clap is None else use_clap
         self.settle = settle
         self.source = ""
+        # Optional callback(peak, floor, needs) -- the dashboard's amplitude
+        # ring. The detector already computes these for its own decision, so
+        # reporting them costs nothing.
+        self.on_level = None
         self._oww = None
         # Set while Jarvis is speaking. Its own voice reaches the mic, and a
         # long reply otherwise reads as a wake. Tier-3 completions and watcher
@@ -219,6 +223,12 @@ class WakeListener:
         attributed instead of guessed at.
         """
         if not self.use_clap:
+            if self.on_level is not None:
+                try:
+                    peak = float(np.max(np.abs(chunk))) if chunk.size else 0.0
+                    self.on_level(peak, self.clap.min_peak, self.clap.min_peak)
+                except Exception:
+                    pass
             if self._oww is not None:
                 pcm = (np.clip(chunk, -1.0, 1.0) * 32767).astype(np.int16)
                 hits = [k for k, v in self._oww.predict(pcm).items() if v > WAKEWORD_THRESHOLD]
@@ -231,6 +241,12 @@ class WakeListener:
         floor = self.clap.baseline()
         needs = max(floor * self.clap.ratio, self.clap.min_peak)
         pending_before = self.clap._since_first_clap is not None
+
+        if self.on_level is not None:
+            try:
+                self.on_level(peak, floor, needs)
+            except Exception:
+                pass  # a broken dashboard must not stop wake detection
 
         if self.clap.feed(chunk):
             self.source = "clap"

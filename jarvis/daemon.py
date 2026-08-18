@@ -5,6 +5,8 @@ import numpy as np
 
 import time
 
+from jarvis.dash.bus import BUS
+from jarvis.dash.server import Dashboard
 from jarvis.ears.stt import Transcriber
 from jarvis.ears.wake import SETTLE_SECONDS, Capture, WakeListener
 from jarvis.router.confirm import Confirmation
@@ -57,7 +59,42 @@ class Jarvis:
         self.busy = False          # true while a turn is being handled
         self.conversation = Conversation()
         self.listener = WakeListener(self._on_wake)
+        self.dash = Dashboard()
+        self.listener.on_level = self._publish_level
         self.scheduler = self._build_scheduler()
+
+    # ---- dashboard -----------------------------------------------------
+
+    def _publish_level(self, peak: float, floor: float, needs: float) -> None:
+        """Called for every audio chunk. Normalised so the ring does not need
+        to know this mic peaks well above 1.0."""
+        BUS.publish("level", peak=peak, floor=floor, needs=needs,
+                    norm=min(1.0, peak / max(needs * 3, 0.25)))
+
+    def _publish_state(self, state: str, line: str = "") -> None:
+        BUS.publish("state", state=state, line=line)
+
+    def _publish_context(self) -> None:
+        """Refresh the right-hand rail. Best effort: a dashboard that cannot be
+        populated is not a reason to interrupt a turn."""
+        try:
+            tickets = []
+            raw = self.worker.call("release_card_ids")
+            release = raw.get("release", "")
+            ids = raw.get("ids", [])
+            titles = raw.get("titles", {})
+            for zi in ids[:8]:
+                tickets.append({"id": zi, "title": titles.get(zi, "")})
+            BUS.publish(
+                "context",
+                release=release,
+                mine=f"{len(ids)} in release",
+                issues=len(self.vocab.zi_ids),
+                reminders=len(self.store.due_tasks()),
+                tickets=tickets,
+            )
+        except Exception:
+            pass
 
     def _build_scheduler(self) -> Scheduler:
         s = Scheduler()
@@ -80,12 +117,18 @@ class Jarvis:
             speak(response)
             return
         listener.muted.set()
+        BUS.publish("state", state="speaking", line="")
         try:
             speak(response)
         finally:
             time.sleep(SETTLE_SECONDS)   # speakers lag `say` returning
             listener.reset()
             listener.muted.clear()
+            # Without this the dial sticks on "speaking" forever: a watcher
+            # announcement outside a turn has nothing else to reset it.
+            if not self.busy:
+                BUS.publish("state", state="idle",
+                            line="listening for \u201chey jarvis\u201d")
 
     def _announce(self, lines: list[str]) -> None:
         """Speak watcher output — unless a turn is in progress, in which case
@@ -96,6 +139,8 @@ class Jarvis:
             return
         for line in lines:
             print(f"\n  [watcher] {line}", flush=True)
+            level = "alert" if line.lower().startswith("reminder") else "info"
+            BUS.publish("card", level=level, title="watcher", message=line)
             self._say(Response(speech=line, detail=line))
 
     def _load_vocab(self) -> Vocab:
@@ -108,8 +153,11 @@ class Jarvis:
         self.vocab = self._load_vocab()
 
     def handle_utterance(self, audio: np.ndarray, capture=None) -> Response:
+        self._publish_state("thinking", "working on it")
         text = self.transcriber.transcribe(audio, self.vocab)
         print(f"  heard: {text!r}", flush=True)
+        if text:
+            BUS.publish("turn", who="you", text=text)
 
         target = self.manager.resolve_alias(text) if text else None
         if target and target != self.domain and any(p in text.lower() for p in SWITCH_PHRASES):
@@ -123,6 +171,8 @@ class Jarvis:
             conversation=self.conversation,
         )
         print(f"  reply [tier {response.tier} ok={response.ok}]: {response.speech}", flush=True)
+        if response.speech:
+            BUS.publish("turn", who="jarvis", text=response.speech)
 
         # Every command is logged, including the ones that fell through. After
         # a week, store.tier3_counts() says which intent to add next.
@@ -212,6 +262,8 @@ class Jarvis:
             conversation=self.conversation,
         )
         print(f"  reply [tier {response.tier} ok={response.ok}]: {response.speech}", flush=True)
+        if response.speech:
+            BUS.publish("turn", who="jarvis", text=response.speech)
         if response.needs_confirm and response.pending is not None:
             return self._run_confirmation(response, capture)
         if response.tier == 3:
@@ -231,6 +283,7 @@ class Jarvis:
         def done(output: str) -> None:
             head = " ".join(output.split())[:200] or "no output"
             print(f"\n  [job finished] {head}", flush=True)
+            BUS.publish("job", status="finished", what=question)
             spoken = self._summarise(output, question)
             self._say(Response(speech=spoken, detail=output[:600], tier=3))
 
@@ -239,6 +292,7 @@ class Jarvis:
             self._say(busy)
             return busy
 
+        BUS.publish("job", status="running", what=question)
         working = Response(speech="Ok boss, fetching that now.", detail=question, tier=3)
         self._say(working)
         return working
@@ -266,12 +320,15 @@ class Jarvis:
         print(f"\n*** woken ({source or 'unknown'}) ***", flush=True)
         self.busy = True
         self.conversation = Conversation()
+        self.dash.open_once()
         try:
+            self._publish_state("speaking", "greeting you")
             self._say(Response(speech=greeting()))
             window = CAPTURE_SECONDS
 
             for turn in range(MAX_TURNS):
                 print(f"  listening ({window:.0f}s)...", flush=True)
+                self._publish_state("listening", "go ahead, boss")
                 capture.drain()
                 response = self.handle_utterance(capture.record(window), capture)
 
@@ -284,6 +341,7 @@ class Jarvis:
                 window = CAPTURE_SECONDS if response.awaiting else FOLLOWUP_SECONDS
         finally:
             self.busy = False
+            self._publish_state("idle", "listening for \u201chey jarvis\u201d")
 
         # Anything the watchers held during the turn goes out now.
         held = self.scheduler.drain()
@@ -291,6 +349,16 @@ class Jarvis:
             self._announce(held)
 
     def run(self) -> None:
+        if self.dash.start():
+            print(f"dashboard on {self.dash.url}", flush=True)
+        else:
+            print(f"dashboard port busy; skipping ({self.dash.url})", flush=True)
+        BUS.publish("meta", domain=self.domain,
+                    wake=__import__("jarvis.ears.wake", fromlist=["WAKE_MODE"]).WAKE_MODE,
+                    voice=__import__("jarvis.voice.speak", fromlist=["VOICE"]).VOICE)
+        self._publish_context()
+        self._publish_state("idle", "listening for \u201chey jarvis\u201d")
+
         print("loading wake word model...", flush=True)
         self.scheduler.start(self._announce)
         listener = self.listener
@@ -307,6 +375,7 @@ class Jarvis:
             pass
         finally:
             self.scheduler.stop()
+            self.dash.stop()
             self.manager.shutdown()
 
 

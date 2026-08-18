@@ -35,6 +35,7 @@ def _jarvis_with_fakes(transcript, worker_result=None):
     j.busy = False
     from jarvis.router.conversation import Conversation
     j.conversation = Conversation()
+    j.dash = MagicMock()
     from jarvis.watch.scheduler import Scheduler
     j.scheduler = Scheduler()
     return j
