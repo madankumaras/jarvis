@@ -501,3 +501,33 @@ def test_the_tier3_line_names_no_mechanism(vocab):
     assert resp.tier == 3
     for banned in ("claude", "tier", "worker", "subprocess", "cli"):
         assert banned not in resp.speech.lower()
+
+
+def test_no_spoken_string_anywhere_names_the_plumbing(vocab):
+    """The two error paths below only fire on failure, so the happy-path tests
+    never caught them saying "Worker" out loud."""
+    banned = ("claude", "tier", "worker", "subprocess", "socket", "rpc", "payload")
+
+    class Dead:
+        def capabilities(self):
+            raise RpcError("connection refused")
+
+        def call(self, m, **p):
+            return {}
+
+    resp = handle_transcript("status of ZI-691", vocab, Dead())
+    assert resp.ok is False
+    for term in banned:
+        assert term not in resp.speech.lower(), f"leaked: {term}"
+
+    class Weird:
+        def capabilities(self):
+            return ["card_status"]
+
+        def call(self, m, **p):
+            return "not a dict"
+
+    resp = handle_transcript("status of ZI-691", vocab, Weird())
+    assert resp.ok is False
+    for term in banned:
+        assert term not in resp.speech.lower(), f"leaked: {term}"

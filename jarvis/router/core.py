@@ -102,7 +102,11 @@ def _handle(
     try:
         available = worker.capabilities()
     except RpcError as exc:
-        return Response(speech=f"Worker isn't responding: {exc}", ok=False)
+        return Response(
+            speech="I can't reach that project right now.",
+            detail=f"worker capabilities failed: {exc}",
+            ok=False,
+        )
 
     # Memory intents are answered here, not by the worker: the store belongs
     # to the daemon and is domain-agnostic.
@@ -123,7 +127,11 @@ def _handle(
         return Response(speech=str(exc), detail=str(exc), ok=False)
 
     if not isinstance(payload, dict):
-        return Response(speech="Worker returned an unexpected result.", ok=False)
+        return Response(
+            speech="I got a strange answer back — try again?",
+            detail="worker returned a non-dict payload",
+            ok=False,
+        )
 
     # "What are my tasks" means both things you told Jarvis and what Trello
     # says. Asking twice would be a worse product than merging once.
