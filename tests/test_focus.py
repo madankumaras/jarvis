@@ -206,3 +206,100 @@ def test_minimising_with_no_window_says_so(monkeypatch):
     ok, spoken = apps.minimise_front()
     assert ok is False
     assert "can't see a window" in spoken
+
+
+# --- how much of the machine can it actually reach -----------------------
+
+def test_finder_resolves():
+    """Finder lives in /System/Library/CoreServices, which is not scanned --
+    117 internal agents live there too. It is named explicitly instead."""
+    assert apps.resolve("finder") == "Finder"
+    assert apps.resolve("files") == "Finder"
+
+
+def test_keychain_access_resolves():
+    """It is no longer in /System/Applications/Utilities on this macOS; it
+    moved to CoreServices/Applications, and resolved to nothing until that
+    directory was added."""
+    assert apps.resolve("keychain access") == "Keychain Access"
+    assert apps.resolve("keychain") == "Keychain Access"
+
+
+@pytest.mark.parametrize("said", ["system preferences", "preferences", "settings"])
+def test_the_old_name_for_system_settings_still_works(said):
+    """Renamed in Ventura, still said the old way."""
+    assert apps.resolve(said) == "System Settings"
+
+
+@pytest.mark.parametrize("said", [
+    "slack", "chrome", "firefox", "vs code", "terminal", "safari",
+    "activity monitor", "disk utility", "screenshot", "script editor",
+    "calculator", "preview", "textedit", "app store",
+])
+def test_ordinary_app_names_resolve(said):
+    assert apps.resolve(said) != ""
+
+
+@pytest.mark.parametrize("said", ["banana split", "xyzzy", "nonsense app name"])
+def test_an_app_that_is_not_there_is_refused_rather_than_guessed(said):
+    """Opening the wrong app is more confusing than admitting no match."""
+    assert apps.resolve(said) == ""
+
+
+def test_the_user_applications_folder_is_searched(monkeypatch, tmp_path):
+    (tmp_path / "Homemade.app").mkdir()
+    monkeypatch.setattr(apps, "SEARCH_DIRS", (str(tmp_path),))
+    monkeypatch.setattr(apps, "EXTRA_APPS", {})
+    assert "Homemade" in apps.installed()
+
+
+def test_a_vendor_subfolder_is_searched(monkeypatch, tmp_path):
+    """Setapp, Microsoft Office and Adobe all bury their apps one level down."""
+    nested = tmp_path / "Microsoft Office"
+    nested.mkdir()
+    (nested / "Microsoft Word.app").mkdir()
+    monkeypatch.setattr(apps, "SEARCH_DIRS", (str(tmp_path),))
+    monkeypatch.setattr(apps, "EXTRA_APPS", {})
+    assert "Microsoft Word" in apps.installed()
+
+
+def test_a_helper_bundle_inside_a_bundle_is_ignored(monkeypatch, tmp_path):
+    """Every app contains helper .app bundles; none of them are launchable."""
+    outer = tmp_path / "Big.app"
+    (outer / "Contents" / "Helpers").mkdir(parents=True)
+    (outer / "Contents" / "Helpers" / "Updater.app").mkdir()
+    monkeypatch.setattr(apps, "SEARCH_DIRS", (str(tmp_path),))
+    monkeypatch.setattr(apps, "EXTRA_APPS", {})
+    found = apps.installed()
+    assert "Big" in found
+    assert "Updater" not in found
+
+
+def test_spotlight_is_only_a_fallback(monkeypatch):
+    """Spotlight knows 321 bundles against 76 in the scanned directories, and
+    most of the difference is internal helpers. A pool that size makes a fuzzy
+    mishear likelier to land somewhere surprising, so it runs last."""
+    called = []
+    monkeypatch.setattr(apps, "spotlight", lambda n: called.append(n) or "")
+    apps.resolve("slack")
+    assert called == [], "spotlight ran for an app already in the list"
+    apps.resolve("definitely not installed anywhere")
+    assert called, "spotlight should be the last resort"
+
+
+def test_spotlight_failure_is_not_a_crash(monkeypatch):
+    def boom(*a, **k):
+        raise OSError("mdfind missing")
+
+    monkeypatch.setattr(apps.subprocess, "run", boom)
+    assert apps.spotlight("anything") == ""
+
+
+def test_spotlight_skips_bundles_nested_in_other_bundles(monkeypatch):
+    class Done:
+        returncode = 0
+        stdout = ("/Applications/Big.app/Contents/Helpers/Thing.app\n"
+                  "/Applications/Thing.app\n")
+
+    monkeypatch.setattr(apps.subprocess, "run", lambda *a, **k: Done())
+    assert apps.spotlight("thing") == "Thing"

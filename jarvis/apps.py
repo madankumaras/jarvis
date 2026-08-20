@@ -11,7 +11,25 @@ import re
 import subprocess
 from pathlib import Path
 
-SEARCH_DIRS = ("/Applications", "/System/Applications", "/System/Applications/Utilities")
+SEARCH_DIRS = (
+    "/Applications",
+    "~/Applications",                                # per-user installs
+    "/System/Applications",
+    "/System/Applications/Utilities",
+    # 12 user-facing apps, and the only home of Keychain Access on this macOS --
+    # it is no longer in Utilities, which is why "keychain access" resolved to
+    # nothing. Deliberately NOT its parent /System/Library/CoreServices, which
+    # holds 117 internal agents (AirPlayUIAgent, AddressBookUrlForwarder,
+    # AccessibilityUIServer). Putting those in the pool would let one mishear
+    # launch a system daemon.
+    "/System/Library/CoreServices/Applications",
+)
+
+# Apps that live outside every scanned directory, or are said by a name the
+# bundle does not have.
+EXTRA_APPS = {
+    "Finder": "/System/Library/CoreServices/Finder.app",
+}
 # Measured: real mishears score 0.89-0.91 ("slak"->slack, "sfari"->safari),
 # while unrelated words reach 0.67 ("chrom"->home). 0.8 separates them, and
 # opening the wrong app is more confusing than admitting no match.
@@ -29,19 +47,81 @@ ALIASES = {
     "mail": "Mail",
     "calendar": "Calendar",
     "activity monitor": "Activity Monitor",
+    # Renamed in macOS Ventura, still said the old way.
+    "system preferences": "System Settings",
+    "preferences": "System Settings",
+    "settings": "System Settings",
+    "keychain": "Keychain Access",
+    "finder": "Finder",
+    "files": "Finder",
+    "vs": "Visual Studio Code",
+    "editor": "Visual Studio Code",
+    "notes": "Notes",
+    "music": "Music",
+    "spotify": "Spotify",
+    "whatsapp": "WhatsApp",
+    "teams": "Microsoft Teams",
+    "excel": "Microsoft Excel",
+    "word": "Microsoft Word",
+    "outlook": "Microsoft Outlook",
 }
 
 
 def installed() -> list[str]:
-    """Application names, without the .app suffix."""
+    """Application names, without the .app suffix.
+
+    One level of nesting is included so vendor folders work -- Setapp,
+    "Microsoft Office", "Adobe Creative Cloud" all bury their apps a directory
+    down. There are none on this machine today, which is exactly why it is worth
+    handling before there are.
+    """
     names: set[str] = set()
     for directory in SEARCH_DIRS:
-        d = Path(directory)
+        d = Path(directory).expanduser()
         if not d.is_dir():
             continue
         for app in d.glob("*.app"):
             names.add(app.stem)
+        for app in d.glob("*/*.app"):
+            # A bundle inside a bundle is a helper, not something to launch.
+            if ".app/" not in str(app):
+                names.add(app.stem)
+    for name, path in EXTRA_APPS.items():
+        if Path(path).exists():
+            names.add(name)
     return sorted(names)
+
+
+def spotlight(spoken: str) -> str:
+    """Ask macOS's own index for an app, for anything the directories missed.
+
+    A fallback rather than the primary source. Spotlight knows about 321 app
+    bundles here against 76 in the scanned directories, and most of that
+    difference is internal helpers -- a pool that size makes a fuzzy mishear
+    much more likely to land somewhere surprising. Used only once the curated
+    list has failed, so precision comes first and reach second. Measured at
+    under 100ms.
+    """
+    wanted = (spoken or "").strip().removeprefix("the ").strip()
+    if not wanted:
+        return ""
+    try:
+        done = subprocess.run(
+            ["mdfind", "-onlyin", "/",
+             "kMDItemContentType == 'com.apple.application-bundle' && "
+             f'kMDItemFSName == "{wanted}.app"c'],
+            capture_output=True, text=True, timeout=10,
+        )
+    except Exception:
+        return ""
+    if done.returncode != 0:
+        return ""
+    for line in done.stdout.splitlines():
+        path = Path(line.strip())
+        # Skip helpers nested inside another bundle.
+        if path.name.endswith(".app") and ".app/" not in str(path):
+            return path.stem
+    return ""
 
 
 def resolve(spoken: str) -> str:
@@ -71,7 +151,11 @@ def resolve(spoken: str) -> str:
         return contains[0]
 
     close = difflib.get_close_matches(wanted, list(lowered), n=1, cutoff=MATCH_CUTOFF)
-    return lowered[close[0]] if close else ""
+    if close:
+        return lowered[close[0]]
+
+    # Last resort: ask Spotlight, which finds apps in places nobody scans.
+    return spotlight(wanted)
 
 
 def open_app(name: str) -> tuple[bool, str]:

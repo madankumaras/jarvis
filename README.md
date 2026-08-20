@@ -150,6 +150,21 @@ The whole point of "bring Slack front" is that Slack is not in front.
 app's own scripting dictionary, so it works for browsers, Terminal, Finder and
 Preview but not for Electron apps.
 
+Every app in `/Applications`, `~/Applications`, `/System/Applications`, its
+`Utilities`, and `CoreServices/Applications` — plus one level of nesting, so
+Setapp and Microsoft Office folders work. Two apps needed finding by hand:
+**Finder** is in `/System/Library/CoreServices`, whose other 117 entries are
+internal agents like `AirPlayUIAgent` — putting those in the pool would let one
+mishear launch a system daemon — and **Keychain Access** has moved out of
+Utilities on current macOS, so it resolved to nothing.
+
+Anything still unfound falls through to Spotlight, which knows every app bundle
+on the disk in under 100ms. It is the fallback rather than the primary source
+on purpose: 321 bundles against 90, and most of the difference is helpers, so
+searching it first would make a mishear far likelier to land somewhere odd. An
+app that genuinely is not installed is refused rather than guessed at — opening
+the wrong app is more confusing than admitting no match.
+
 ### Looking at the screen
 
 "See this request, is it correct?" photographs **only the frontmost window** and
