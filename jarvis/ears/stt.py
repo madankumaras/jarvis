@@ -5,6 +5,7 @@ import os
 
 import numpy as np
 
+from jarvis.correct.fillers import strip_fillers
 from jarvis.types import Vocab
 
 SAMPLE_RATE = 16000
@@ -104,4 +105,8 @@ class Transcriber:
                     f"  [stt] dropped no_speech={nsp:.3f} logprob={lp:.3f} {s.text!r}",
                     flush=True,
                 )
-        return " ".join(kept).strip()
+        # Strip fillers here, the one point all three callers go through, so the
+        # read-back, the tier-3 prompt and the dashboard transcript all get the
+        # cleaned text. Typed input needs none of this, which is why it is here
+        # and not in handle_transcript.
+        return strip_fillers(" ".join(kept).strip())

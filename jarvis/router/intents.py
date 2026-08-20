@@ -397,7 +397,13 @@ INTENTS: list[Intent] = [
             # "what cards assigned to me" with no release named -- the whole
             # point of my_work over my_tasks is that it reads the QA labels,
             # so this is the better answer to the plain question too.
-            r"|\b(?:cards?|tickets?)\s+assigned\s+to\s+me\b"
+            # The copula has to be optional. "What cards ARE assigned to me" is
+            # the most natural way to ask this and matched nothing at all, while
+            # "what cards assigned to me" worked -- the reverse of what a person
+            # would guess, and the phrasing asked for most often.
+            r"|\b(?:cards?|tickets?)\s+(?:(?:are|is|were|have\s+been)\s+)?"
+            r"assigned\s+to\s+me\b"
+            r"|\b(?:what'?s?|anything)\s+assigned\s+to\s+me\b"
             r"|\bmy\s+(?:cards?|tickets?)\b",
             re.I,
         ),

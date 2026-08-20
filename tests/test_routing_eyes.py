@@ -103,3 +103,29 @@ def test_reading_replies_is_not_reading_a_document():
 def test_a_dm_mentioning_the_screen_still_sends():
     """A DM body can say anything, including "look at this"."""
     assert named("dm Ashok saying look at this screen") == "send_dm"
+
+
+# --- the phrasing asked for most often -----------------------------------
+
+@pytest.mark.parametrize("said", [
+    "what cards assigned to me",
+    "what cards are assigned to me",
+    "which cards are assigned to me",
+    "what tickets are assigned to me",
+    "what's assigned to me",
+    "anything assigned to me",
+    "my cards",
+])
+def test_every_way_of_asking_what_is_mine_routes_the_same(said):
+    """Regression: "what cards ARE assigned to me" matched nothing at all,
+    while "what cards assigned to me" worked -- the reverse of what anyone
+    would guess, on the question asked most often."""
+    assert named(said) == "my_work"
+
+
+@pytest.mark.parametrize("said", [
+    "in 385 how many tickets are assigned to me",
+    "in MCSL 385 which tickets are assigned to me",
+])
+def test_naming_a_release_still_scopes_to_that_release(said):
+    assert named(said) == "my_release_cards"

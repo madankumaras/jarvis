@@ -46,6 +46,15 @@ SWITCH_PHRASES = ("switch to", "use ", "jarvis,")
 _SUBJECT = re.compile(r"\b((?!MCSL\b)[A-Z]{2,6}-\d{1,5}|MCSL[\s-]?\d{2,4})\b", re.I)
 
 
+def _clip(words: str, limit: int = 60) -> str:
+    """Trim to a word boundary. A raw slice cut mid-word, so a long request was
+    read back as "looking into the rate for the interna"."""
+    if len(words) <= limit:
+        return words
+    cut = words[:limit].rsplit(" ", 1)[0]
+    return (cut or words[:limit]).rstrip(",;:")
+
+
 def _acknowledge(question: str) -> str:
     """Say what is being fetched, not that a tool is running.
 
@@ -58,7 +67,7 @@ def _acknowledge(question: str) -> str:
         return f"Ok boss, give me a minute — I'll get the details on {found.group(1).upper()}."
     words = " ".join((question or "").split())
     if words:
-        return f"Ok boss, give me a minute — looking into {words[:60]}."
+        return f"Ok boss, give me a minute — looking into {_clip(words)}."
     return "Ok boss, give me a minute."
 
 
