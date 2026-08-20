@@ -55,11 +55,36 @@ _ABBREV = {
     "url": "U R L", "uuid": "U U ID", "csv": "C S V", "json": "jason",
     "sku": "S K U", "hs": "H S", "eta": "E T A", "sla": "S L A",
     "pr": "P R", "qa": "Q A", "tc": "test case", "ac": "acceptance criteria",
+    # Carriers and domain terms whose vowels would otherwise have them read as
+    # words: "UPS" as a word, "USPS" as one syllable of nonsense.
+    "ups": "U P S", "usps": "U S P S", "dhl": "D H L", "gls": "G L S",
+    "tnt": "T N T", "zi": "Z I", "kg": "K G", "lbs": "pounds", "cm": "centimetres",
+    "aupost": "Au Post", "mcsl": "M C S L", "wms": "W M S", "sl": "S L",
+    "eu": "E U", "us": "U S", "uk": "U K", "in": "in", "iata": "I A T A",
+    # Currency codes all contain a vowel, so the rule below would attempt them
+    # as words -- "Inr", "Aud". The name is what a person says anyway.
+    "inr": "rupees", "usd": "dollars", "eur": "euros", "gbp": "pounds",
+    "aud": "Australian dollars", "cad": "Canadian dollars", "aed": "dirhams",
 }
 
 _CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
-_ACRONYM = re.compile(r"\b([A-Z]{2,4})\b")
+_ACRONYM = re.compile(r"\b([A-Z]{2,6})\b")
 _WORD = re.compile(r"[A-Za-z]+")
+# A vowel means it can be attempted as a word. Measured against 28 real tokens:
+# after the known domain terms above are handled, this rule is correct on every
+# remaining one -- MCSL, DHL, GLS, TNT, KG, CSV spelled; USE, LIST, ACCOUNT,
+# PICKUP, SCHEDULED, TRUE, NULL, ERROR, OPEN, DONE, GET said as words. It fails
+# safe: an odd pronunciation beats eight spelled-out letters.
+_VOWEL = re.compile(r"[AEIOUY]")
+# Extensions read aloud as "dot m d". The name alone is the useful part.
+_CODE_EXT = re.compile(
+    r"\.(?:md|py|js|ts|tsx|json|ya?ml|txt|csv|sql|sh|html?|xml|log|env|ini|toml)\b",
+    re.I,
+)
+# A random-looking tail on an identifier, as Shopify puts on every store slug:
+# "mypostautomation-gs01o4wy". Reading it out is noise, and the readable half
+# is what identifies the store to a person.
+_RANDOM_TAIL = re.compile(r"(?<=[a-z]{3})-(?=[a-z0-9]{6,12}\b)(?=[a-z0-9]*\d)[a-z0-9]+\b")
 
 
 def _expand_identifiers(text: str) -> str:
@@ -77,8 +102,20 @@ def _expand_identifiers(text: str) -> str:
         return _ABBREV.get(w.lower(), w)
 
     out = _WORD.sub(_word, out)
-    # After abbreviation expansion, so "API" is not spaced twice.
-    return _ACRONYM.sub(lambda m: " ".join(m.group(1)), out)
+
+    # After abbreviation expansion, so "API" is not spaced twice. Only tokens
+    # with no vowel are spelled out: spacing every capitalised run turned
+    # USE_SCHEDULED_PICKUP into "U S E SCHEDULED PICKUP" and LIST into "L I S T".
+    def _caps(m: re.Match[str]) -> str:
+        token = m.group(1)
+        # Left exactly as it is, not capitalised: `say` reads ACCOUNT and
+        # PARSPL the same either way, and rewriting them loses a service code
+        # verbatim for no audible gain.
+        if _VOWEL.search(token):
+            return token
+        return " ".join(token)
+
+    return _ACRONYM.sub(_caps, out)
 
 
 def speakable(text: str) -> str:
@@ -90,6 +127,10 @@ def speakable(text: str) -> str:
     out = text or ""
     for pattern, replacement in _SPEAKABLE:
         out = pattern.sub(replacement, out)
+    # Before identifier expansion, which would otherwise spell out the tail of a
+    # store slug and read ".md" as "dot m d".
+    out = _RANDOM_TAIL.sub("", out)
+    out = _CODE_EXT.sub("", out)
     out = _expand_identifiers(out)
     return re.sub(r"\s+", " ", out).strip(" ,.;:-")
 

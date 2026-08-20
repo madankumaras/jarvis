@@ -284,6 +284,20 @@ separate things, both readable rather than guessable: emoji in Trello comments
 as "bkg ref id"). Both are now rewritten before speaking — the first removed,
 the second expanded to "booking reference I D".
 
+Capitals are the third. Spacing out every capitalised run read
+`USE_SCHEDULED_PICKUP` as "U S E SCHEDULED PICKUP" and `LIST` as "L I S T".
+Measured against 28 real tokens, no single rule works: carrier acronyms contain
+vowels but must be spelled (`UPS`, `USPS`) while `USE` and `LIST` must not. So
+domain terms are named explicitly and everything else goes by whether it has a
+vowel — correct on every remaining token, and it fails safe, since an odd
+pronunciation beats eight spelled-out letters. A token with a vowel is left
+verbatim rather than reworded, so a service code like `PARSPL` survives intact.
+
+Two more sources of noise are dropped outright: file extensions (`.md` read as
+"dot m d") and the random tail Shopify puts on every store slug —
+`mypostautomation-gs01o4wy` is spoken as "mypostautomation", since the readable
+half is what identifies the store to a person.
+
 Anything that leaves your machine — a Slack DM, a store creation — is read back
 to you and waits for an explicit "ok". Anything that is not a bare affirmative
 counts as no: "ok so actually make it the GLS store" is a correction, not

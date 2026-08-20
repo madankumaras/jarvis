@@ -4,6 +4,7 @@ import pytest
 from unittest.mock import patch
 
 from jarvis.types import Response
+from jarvis.voice.speak import speakable
 from jarvis.voice.speak import notify, say, speak
 
 
@@ -272,3 +273,85 @@ def test_whitespace_is_collapsed_after_expansion():
     from jarvis.voice.speak import speakable
 
     assert "  " not in speakable("bkg_ref_id  __  payment_mode")
+
+
+# --- capitals that are real words -----------------------------------------
+
+@pytest.mark.parametrize("said,expected", [
+    ("USE_SCHEDULED_PICKUP", "USE"),
+    ("rateRequestType LIST", "LIST"),
+    ("status is TRUE", "TRUE"),
+    ("value is NULL", "NULL"),
+    ("state is OPEN", "OPEN"),
+    ("marked DONE", "DONE"),
+    ("the ACCOUNT rate", "ACCOUNT"),
+    ("24_SPP_PARSPL service code", "PARSPL"),
+])
+def test_a_capitalised_real_word_is_not_spelled_out(said, expected):
+    """Spacing every capitalised run turned USE_SCHEDULED_PICKUP into
+    "U S E SCHEDULED PICKUP" and LIST into "L I S T". A vowel means it can be
+    attempted as a word, and the token is left verbatim -- `say` reads ACCOUNT
+    and Account identically, so rewriting it only loses a service code."""
+    out = speakable(said)
+    assert expected in out
+    assert " ".join(expected) not in out
+
+
+@pytest.mark.parametrize("said,expected", [
+    ("MCSL 385", "M C S L"),
+    ("the DHL rate", "D H L"),
+    ("GLS packaging", "G L S"),
+    ("TNT is pending", "T N T"),
+    ("2 KG", "K G"),
+])
+def test_a_vowelless_acronym_is_still_spelled_out(said, expected):
+    assert expected in speakable(said)
+
+
+@pytest.mark.parametrize("said,expected", [
+    ("the UPS rate", "U P S"),
+    ("USPS label", "U S P S"),
+    ("250 INR", "rupees"),
+    ("45 AUD", "Australian dollars"),
+])
+def test_domain_terms_with_vowels_are_named_explicitly(said, expected):
+    """"UPS" and "USPS" contain vowels, so the rule would attempt them as
+    words. Currency codes likewise -- "Inr", "Aud"."""
+    assert expected in speakable(said)
+
+
+# --- identifiers that are noise ------------------------------------------
+
+def test_a_random_store_suffix_is_not_read_out():
+    """Shopify puts a random tail on every store slug. The readable half is
+    what identifies the store to a person."""
+    out = speakable("Opening the mypostautomation-gs01o4wy store")
+    assert "mypostautomation" in out
+    assert "gs01o4wy" not in out
+
+
+def test_a_meaningful_hyphenated_name_survives():
+    """A slug made of words keeps them. "qa" still becomes "Q A", which is
+    right -- the store really is named QA-moody-store -- so what matters is
+    that no part is dropped the way a random suffix is."""
+    out = speakable("Opening qa-moody-store")
+    assert "moody" in out and "store" in out
+    assert "667" in speakable("ZI-667 is verified")
+
+
+def test_a_file_extension_is_not_read_as_letters():
+    out = speakable("I read MCSL_383_Support_Guide.md")
+    assert ".md" not in out
+    assert "Support Guide" in out
+
+
+@pytest.mark.parametrize("name", ["core.py", "vision.ts", "config.yaml", "run.sh"])
+def test_code_extensions_are_dropped(name):
+    assert "." not in speakable(f"look at {name}")
+
+
+def test_a_json_field_becomes_words():
+    """Verbatim from the screen-judging answer."""
+    out = speakable("totalPackageCount is 2 but requestedPackageLineItems has one entry")
+    assert "total Package Count" in out
+    assert "requested Package Line Items" in out
