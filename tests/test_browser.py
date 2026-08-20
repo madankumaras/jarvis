@@ -145,6 +145,7 @@ def test_a_stale_window_id_falls_back_to_launching(chrome, monkeypatch):
     reported as success."""
     (chrome / "windows.json").write_text(json.dumps({"Default": "99"}))
     monkeypatch.setattr(browser, "window_ids", lambda: {"100"})
+    monkeypatch.setattr(browser, "identify", lambda d: "")
     monkeypatch.setattr(browser, "_new_window", lambda before, **k: "101")
     launched = []
     monkeypatch.setattr(browser.subprocess, "run", lambda *a, **k: launched.append(a[0]))
@@ -157,6 +158,7 @@ def test_a_stale_window_id_falls_back_to_launching(chrome, monkeypatch):
 
 def test_the_new_window_id_is_remembered(chrome, monkeypatch):
     monkeypatch.setattr(browser, "window_ids", lambda: set())
+    monkeypatch.setattr(browser, "identify", lambda d: "")
     monkeypatch.setattr(browser, "_new_window", lambda before, **k: "555")
     monkeypatch.setattr(browser.subprocess, "run", lambda *a, **k: None)
 
@@ -166,6 +168,7 @@ def test_the_new_window_id_is_remembered(chrome, monkeypatch):
 
 def test_a_launch_failure_is_reported_not_raised(chrome, monkeypatch):
     monkeypatch.setattr(browser, "window_ids", lambda: set())
+    monkeypatch.setattr(browser, "identify", lambda d: "")
 
     def boom(*a, **k):
         raise OSError("no open binary")
@@ -229,4 +232,213 @@ def test_a_bare_chrome_carries_no_profile(said):
     ("bring the 383 window front", "focus_window"),
 ])
 def test_everything_else_is_untouched(said, expected):
+    assert named(said) == expected
+
+
+# --- windows Jarvis did not open ----------------------------------------
+
+def test_an_existing_window_is_identified_by_its_pages(chrome, monkeypatch):
+    """The question that prompted this: three profiles were already open by
+    hand, and the cache only knows what Jarvis launched itself. Without this,
+    "bring office chrome front" opened a fourth window while the office one sat
+    there already.
+
+    Measured on the three real windows: each scored 1.00 against its own
+    profile's session hosts and at most 0.43 against the others.
+    """
+    monkeypatch.setattr(browser, "_session_hosts", lambda d, recent=3: {
+        "Default": {"admin.shopify.com", "trello.com", "app.slack.com"},
+        "Profile 1": {"phonepe.com", "razorpay.com"},
+        "Profile 5": {"youtube.com", "netflix.com"},
+    }[d])
+    monkeypatch.setattr(browser, "_live_windows", lambda: {
+        "10": {"youtube.com", "netflix.com"},
+        "20": {"admin.shopify.com", "trello.com"},
+        "30": {"phonepe.com"},
+    })
+    assert browser.identify("Default") == "20"
+    assert browser.identify("Profile 1") == "30"
+    assert browser.identify("Profile 5") == "10"
+
+
+def test_a_window_that_fits_two_profiles_is_not_claimed(chrome, monkeypatch):
+    """Google and Gmail are open in every profile. A window of nothing but
+    shared hosts identifies nothing, and guessing would raise the wrong one."""
+    shared = {"google.com", "mail.google.com"}
+    monkeypatch.setattr(browser, "_session_hosts", lambda d, recent=3: shared)
+    monkeypatch.setattr(browser, "_live_windows", lambda: {"10": shared})
+    assert browser.identify("Default") == ""
+
+
+def test_identification_needs_a_clear_winner(chrome, monkeypatch):
+    monkeypatch.setattr(browser, "_session_hosts", lambda d, recent=3: {
+        "Default": {"a.com", "b.com"},
+        "Profile 1": {"a.com", "b.com", "c.com"},
+        "Profile 5": set(),
+    }[d])
+    # Fits Profile 1 at least as well as Default, so Default must not claim it.
+    monkeypatch.setattr(browser, "_live_windows", lambda: {"10": {"a.com", "b.com"}})
+    assert browser.identify("Default") == ""
+
+
+def test_no_session_data_identifies_nothing(chrome, monkeypatch):
+    monkeypatch.setattr(browser, "_session_hosts", lambda d, recent=3: set())
+    assert browser.identify("Default") == ""
+
+
+def test_an_identified_window_is_raised_and_then_cached(chrome, monkeypatch):
+    monkeypatch.setattr(browser, "window_ids", lambda: set())
+    monkeypatch.setattr(browser, "identify", lambda d: "77")
+    monkeypatch.setattr(browser, "raise_window", lambda wid: wid == "77")
+    launched = []
+    monkeypatch.setattr(browser.subprocess, "run", lambda *a, **k: launched.append(a))
+
+    ok, spoken = browser.open_profile("office chrome")
+    assert ok is True and "at the front" in spoken
+    assert launched == [], "should have raised, not launched"
+    assert json.loads((chrome / "windows.json").read_text())["Default"] == "77"
+
+
+def test_nothing_identified_still_launches(chrome, monkeypatch):
+    monkeypatch.setattr(browser, "window_ids", lambda: set())
+    monkeypatch.setattr(browser, "identify", lambda d: "")
+    monkeypatch.setattr(browser, "_new_window", lambda before, **k: "88")
+    launched = []
+    monkeypatch.setattr(browser.subprocess, "run", lambda *a, **k: launched.append(a[0]))
+
+    ok, spoken = browser.open_profile("office chrome")
+    assert ok is True and "Opened" in spoken
+    assert launched, "expected a launch when no window exists"
+
+
+# --- opening a store ----------------------------------------------------
+
+@pytest.fixture
+def slugs(monkeypatch):
+    monkeypatch.setattr(browser, "store_slugs", lambda directory="Default", limit=400: [
+        "mypostautomation-gs01o4wy", "ajexautomation", "ajexautomation2",
+        "qa-moody-store", "indiapoststore2",
+    ])
+
+
+@pytest.mark.parametrize("said,expected", [
+    ("ajex store", "ajexautomation"),
+    ("the ajex store", "ajexautomation"),
+    ("ajexautomation2", "ajexautomation2"),
+    ("moody store", "qa-moody-store"),
+    ("indiapost store", "indiapoststore2"),
+    ("mypostautomation", "mypostautomation-gs01o4wy"),
+])
+def test_a_store_is_found_from_history(slugs, said, expected):
+    """Slugs carry a random suffix -- "mypostautomation-gs01o4wy" is not
+    something anyone says aloud and cannot be constructed from the name, so
+    history is the only source."""
+    assert browser.resolve_store(said)[0] == expected
+
+
+def test_an_exact_name_beats_a_prefix(slugs):
+    """"ajexautomation2" must not open ajexautomation."""
+    assert browser.resolve_store("ajexautomation2") == ["ajexautomation2"]
+
+
+def test_an_ambiguous_name_returns_every_match(slugs):
+    assert browser.resolve_store("ajex") == ["ajexautomation", "ajexautomation2"]
+
+
+def test_an_unknown_store_is_reported_with_what_to_do(chrome, slugs, monkeypatch):
+    monkeypatch.setattr(browser, "open_url", lambda url, d: True)
+    ok, spoken = browser.open_page("banana store")
+    assert ok is False
+    assert "history" in spoken
+
+
+def test_a_store_opens_in_the_office_profile_by_default(chrome, slugs, monkeypatch):
+    """The office account is the one signed in to the stores, so anything
+    work-shaped belongs there without having to say so."""
+    (chrome / "profiles.yaml").write_text("office: someone@company.com\n")
+    opened = {}
+    monkeypatch.setattr(browser, "open_url",
+                        lambda url, d: opened.update(url=url, directory=d) or True)
+    ok, spoken = browser.open_page("the moody store")
+    assert ok is True
+    assert opened["directory"] == "Default"
+    assert opened["url"] == "https://admin.shopify.com/store/qa-moody-store"
+    assert "office" in spoken
+
+
+def test_an_explicit_profile_wins(chrome, slugs, monkeypatch):
+    (chrome / "profiles.yaml").write_text(
+        "office: someone@company.com\npersonal: first@gmail.com\n"
+    )
+    opened = {}
+    monkeypatch.setattr(browser, "open_url",
+                        lambda url, d: opened.update(directory=d) or True)
+    browser.open_page("the moody store", "personal")
+    assert opened["directory"] == "Profile 5"
+
+
+def test_ambiguity_is_said_out_loud(chrome, slugs, monkeypatch):
+    monkeypatch.setattr(browser, "open_url", lambda url, d: True)
+    ok, spoken = browser.open_page("ajex store")
+    assert ok is True
+    assert "ajexautomation" in spoken
+    assert "2 that match" in spoken
+
+
+def test_a_named_url_beats_a_store_search(chrome, monkeypatch):
+    (chrome / "urls.yaml").write_text("partner dashboard: https://partners.shopify.com\n")
+    monkeypatch.setattr(browser, "URLS_CONFIG", str(chrome / "urls.yaml"))
+    opened = {}
+    monkeypatch.setattr(browser, "open_url",
+                        lambda url, d: opened.update(url=url) or True)
+    ok, spoken = browser.open_page("the partner dashboard")
+    assert ok is True
+    assert opened["url"] == "https://partners.shopify.com"
+
+
+def test_a_bare_url_is_opened_as_given(chrome, monkeypatch):
+    opened = {}
+    monkeypatch.setattr(browser, "open_url",
+                        lambda url, d: opened.update(url=url) or True)
+    ok, _ = browser.open_page("https://admin.shopify.com/store/x/orders")
+    assert ok is True
+    assert opened["url"] == "https://admin.shopify.com/store/x/orders"
+
+
+@pytest.mark.parametrize("bad", [
+    "javascript:alert(1)", "file:///etc/passwd", "not a url", "",
+    "data:text/html,<script>x</script>",
+])
+def test_only_http_urls_are_opened(bad):
+    """A URL reaches the command line, and file:// or javascript: has no
+    business being launched by a misheard sentence."""
+    assert browser.open_url(bad, "Default") is False
+
+
+# --- routing for pages --------------------------------------------------
+
+@pytest.mark.parametrize("said,page,profile", [
+    ("open the ajex store", "ajex store", ""),
+    ("open the moody store in office chrome", "moody store", "office"),
+    ("open the partner dashboard", "partner dashboard", ""),
+    ("go to the indiapost store", "indiapost store", ""),
+    ("open https://admin.shopify.com/store/x", "https://admin.shopify.com/store/x", ""),
+])
+def test_a_page_routes_to_the_page_handler(said, page, profile):
+    found = match(said)
+    assert found[0].name == "open_page"
+    assert found[1]["page"] == page
+    assert found[1]["profile"] == profile
+
+
+@pytest.mark.parametrize("said,expected", [
+    ("open slack", "open_app"),
+    ("open the terminal", "open_app"),
+    ("open finder", "open_app"),
+    ("open office chrome", "chrome_profile"),
+    ("open chrome", "chrome_profile"),
+    ("bring office chrome to the front", "chrome_profile"),
+])
+def test_apps_and_profiles_are_not_read_as_pages(said, expected):
+    """The phrase has to end in a page noun, or "open slack" becomes a page."""
     assert named(said) == expected

@@ -368,6 +368,12 @@ def _memory(name: str, params: dict, store, domain: str) -> Response:
         ok, said = open_app(params["app"])
         return Response(speech=said, ok=ok)
 
+    if name == "open_page":
+        from jarvis.browser import open_page
+
+        ok, spoken = open_page(params.get("page", ""), params.get("profile", ""))
+        return Response(speech=spoken, ok=ok)
+
     if name == "chrome_profile":
         from jarvis.apps import focus_window, open_app
         from jarvis.browser import open_profile, resolve_profile

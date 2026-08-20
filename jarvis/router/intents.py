@@ -92,6 +92,15 @@ def _person_params(m: re.Match[str]) -> dict:
     return {"person": m.group("person").strip()}
 
 
+def _page_params(m: re.Match[str]) -> dict:
+    """The page to open, and optionally which Chrome profile to open it in."""
+    groups = m.groupdict()
+    return {
+        "page": (groups.get("page") or groups.get("page2") or "").strip(" .?"),
+        "profile": (groups.get("profile") or "").strip(),
+    }
+
+
 def _profile_params(m: re.Match[str]) -> dict:
     """The words between the verb and "chrome"/"browser", which name a profile.
 
@@ -307,6 +316,30 @@ INTENTS: list[Intent] = [
             re.I,
         ),
         extract=_channel_params,
+    ),
+    Intent(
+        name="open_page",
+        method="__local__",
+        # "open the ajex store", "open the partner dashboard", "open
+        # ajexautomation2 in office chrome", "open https://...".
+        #
+        # Before chrome_profile, or "open the ajex store in office chrome" would
+        # merely raise the browser and stop there.
+        # The phrase must end in a page noun ("... store", "... dashboard"), or
+        # be a bare URL. Without that anchor, "open slack" and "open finder"
+        # would both be read as pages. A lookbehind cannot express it -- the
+        # alternatives are different lengths -- so the noun is part of the
+        # capture instead.
+        pattern=re.compile(
+            r"\b(?:open|launch|go\s+to|pull\s+up|bring\s+up)\s+(?:the\s+|my\s+)?"
+            r"(?P<page>[A-Za-z0-9 ._-]{2,60}?"
+            r"\b(?:store|dashboard|admin|panel|board|portal|site|console))"
+            r"(?:\s+in\s+(?:the\s+|my\s+)?(?P<profile>[A-Za-z0-9 ]{1,20}?)"
+            r"\s*(?:chrome|browser|profile))?\s*$"
+            r"|\b(?:open|launch|go\s+to|pull\s+up)\s+(?P<page2>https?://\S+)",
+            re.I,
+        ),
+        extract=_page_params,
     ),
     Intent(
         name="chrome_profile",
