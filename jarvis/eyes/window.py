@@ -95,20 +95,44 @@ def pick(windows: list[dict]) -> Window | None:
     return max(titled or mine, key=lambda w: w.width * w.height)
 
 
-def frontmost() -> Window | None:
-    """The window in front right now, or None if CoreGraphics is unavailable."""
+def _dump(every_space: bool = False) -> list[dict]:
+    """Raw CGWindowList, or an empty list if CoreGraphics is unavailable.
+
+    "On screen" means the current Space, not merely unoccluded. With Chrome one
+    desktop over, the on-screen list held a single window -- Claude's -- while
+    the full list held 40 across 14 apps. So looking at the screen wants the
+    on-screen list, and finding a window by name wants all of them: the whole
+    point of "bring Slack front" is that Slack is not in front.
+    """
     try:
         import Quartz
     except Exception:
-        return None
+        return []
     try:
-        opts = (
-            Quartz.kCGWindowListOptionOnScreenOnly
-            | Quartz.kCGWindowListExcludeDesktopElements
+        scope = (
+            Quartz.kCGWindowListOptionAll if every_space
+            else Quartz.kCGWindowListOptionOnScreenOnly
         )
-        return pick(list(Quartz.CGWindowListCopyWindowInfo(opts, Quartz.kCGNullWindowID)))
+        opts = scope | Quartz.kCGWindowListExcludeDesktopElements
+        return list(Quartz.CGWindowListCopyWindowInfo(opts, Quartz.kCGNullWindowID))
     except Exception:
-        return None
+        return []
+
+
+def frontmost() -> Window | None:
+    """The window in front right now, or None if CoreGraphics is unavailable."""
+    return pick(_dump())
+
+
+def all_windows() -> list[Window]:
+    """Every window a person could mean, including other Spaces, front to back.
+
+    Works for every app, including the Electron ones whose AppleScript
+    dictionaries have no notion of a window at all -- Slack and VS Code both
+    answer "every window doesn't understand the count message", yet their
+    titles appear here.
+    """
+    return _candidates(_dump(every_space=True))
 
 
 def capture(window: Window, path: str | None = None) -> str:

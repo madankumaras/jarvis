@@ -368,6 +368,18 @@ def _memory(name: str, params: dict, store, domain: str) -> Response:
         ok, said = open_app(params["app"])
         return Response(speech=said, ok=ok)
 
+    if name == "focus_window":
+        from jarvis.apps import focus_window
+
+        ok, said = focus_window(params["app"])
+        return Response(speech=said, ok=ok)
+
+    if name == "minimise_window":
+        from jarvis.apps import minimise_front
+
+        ok, said = minimise_front()
+        return Response(speech=said, ok=ok)
+
     if store is None:
         return Response(speech="Memory isn't set up yet.", ok=False)
 

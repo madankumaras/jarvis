@@ -102,6 +102,9 @@ No microphone handy? The same pipeline works typed:
 | "who is the dev for that" | Trello members plus whether a PR is open |
 | "what is the testing plan for that" | the generated test cases for that ticket |
 | "open slack" / "launch vs code" | launches the app |
+| "bring chrome to the front" | raises it, from any Space |
+| "bring the 383 window front" | raises **that window**, not just the app |
+| "minimise this" | sends the front window to the Dock |
 | "post in qa-team saying ..." | read back, waits for "ok" |
 | "see this request, is it correct" | reads the window in front and **judges** it |
 | "go through this doc and ..." | reads the actual file or page, not a picture of it |
@@ -121,6 +124,31 @@ JARVIS_TIER3_ALLOW=all                                # bypass all checks
 
 `all` lets a misheard sentence modify anything in the target repo, unattended.
 That is why it is opt-in.
+
+### Apps and windows
+
+`open X` launches, `bring X front` / `switch to X` / `go to X` raises. One
+exception: "bring **up** X" is launching, the only spoken form where "bring"
+does not mean move-to-front.
+
+Naming a **window** works too — "bring the 383 window front" picks that Chrome
+window out of three, rather than raising Chrome and leaving whichever tab
+happened to be in front. Windows are found by title across every app and every
+Space, including Electron apps that have no AppleScript window dictionary at all
+(Slack and VS Code both answer "every window doesn't understand the count
+message"). For those, only the app can be raised, and Jarvis says so instead of
+claiming otherwise.
+
+Two things worth knowing:
+
+**"On screen" means the current Space, not merely unoccluded.** With Chrome one
+desktop over, the on-screen window list held exactly one window while the full
+list held 40 across 14 apps — so finding a window has to search all of them.
+The whole point of "bring Slack front" is that Slack is not in front.
+
+**No Accessibility permission is needed** for any of this. Minimising uses each
+app's own scripting dictionary, so it works for browsers, Terminal, Finder and
+Preview but not for Electron apps.
 
 ### Looking at the screen
 

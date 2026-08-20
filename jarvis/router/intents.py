@@ -93,7 +93,14 @@ def _person_params(m: re.Match[str]) -> dict:
 
 
 def _app_params(m: re.Match[str]) -> dict:
-    return {"app": m.group("app").strip(" .?")}
+    """The app or window name, from whichever alternative matched.
+
+    focus_window has two alternatives with their own capture groups, since
+    "bring X front" and "switch to X" need different guards around X.
+    """
+    groups = m.groupdict()
+    name = groups.get("app") or groups.get("app2") or ""
+    return {"app": name.strip(" .?")}
 
 
 def _channel_params(m: re.Match[str]) -> dict:
@@ -291,6 +298,49 @@ INTENTS: list[Intent] = [
             re.I,
         ),
         extract=_channel_params,
+    ),
+    Intent(
+        name="minimise_window",
+        method="__local__",
+        # "minimise this", "hide this window", "send that to the dock".
+        # Before focus_window, which would otherwise claim "this window".
+        pattern=re.compile(
+            # (?:window)? and not window?, which made only the "w" optional and
+            # left "minimize this" matching nothing.
+            r"\b(?:minimi[sz]e|hide)(?:\s+(?:this|that|the))?(?:\s+window)?\s*$"
+            r"|\bsend\s+(?:this|that)(?:\s+window)?\s+to\s+the\s+dock\b",
+            re.I,
+        ),
+        extract=_no_params,
+    ),
+    Intent(
+        name="focus_window",
+        method="__local__",
+        # "bring the 383 window front", "bring Slack to the front", "switch to
+        # Chrome", "go to the terminal", "focus the Trello window".
+        #
+        # One intent for both apps and windows because speech does not
+        # distinguish them: "bring Slack front" names an app, "bring the 383
+        # window front" names a window title, and which is which is only known
+        # after looking.
+        #
+        # Two alternatives rather than one, because "bring" is not on its own a
+        # window verb. "Bring me the status of ZI-667" and "show me my cards"
+        # both matched a single loose pattern and would have tried to raise a
+        # window called "me the status of ZI-667". So "bring" requires an
+        # explicit front cue, while switch/go/focus/raise stand alone. "Show
+        # me" is gone entirely -- far too often the start of a real question.
+        #
+        # A card id is excluded outright: "go to ZI-667" is a card, not a window.
+        pattern=re.compile(
+            r"\bbring\s+(?!up\b|me\b|a\b|an\b)(?P<app>(?:the\s+)?[A-Za-z][A-Za-z0-9 .+-]{1,40}?)"
+            r"\s+(?:to\s+the\s+)?(?:front|forward)\s*$"
+            r"|\b(?:switch\s+to|go\s+to|focus(?:\s+on)?|raise)\s+"
+            r"(?!a\b|an\b|[A-Z]{2,6}-\d)(?P<app2>(?:the\s+)?[A-Za-z][A-Za-z0-9 .+-]{1,40}?)"
+            r"(?:\s+(?:to\s+the\s+)?(?:front|forward))?\s*$",
+            re.I,
+        ),
+        extract=_app_params,
     ),
     Intent(
         name="open_app",
