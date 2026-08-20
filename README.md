@@ -165,6 +165,44 @@ searching it first would make a mishear far likelier to land somewhere odd. An
 app that genuinely is not installed is refused rather than guessed at — opening
 the wrong app is more confusing than admitting no match.
 
+### Chrome profiles
+
+`open office chrome` / `bring the office browser front` / `switch to my personal
+chrome`. Which profile each name means lives in
+`~/.jarvis/chrome_profiles.yaml`, seeded from Chrome on first use and yours to
+edit — **never in this repository**, because those are real addresses:
+
+```yaml
+office: you@company.com
+personal: you@gmail.com
+personal 2: other@gmail.com
+```
+
+The office profile is guessed as the one whose mail domain nobody can sign up
+for, which is the label that matters — it is the account signed in to the
+Shopify stores, so the wrong profile is a wasted trip. Personal accounts are
+numbered in Chrome's own order, which is arbitrary: it labelled the two the
+opposite way round from how they were actually referred to. That is what the
+config file is for.
+
+Three measured facts shape this:
+
+**Profiles are identifiable only by email.** All three profiles carried the
+display name "Madan", so `info_cache[dir]["name"]` is useless.
+
+**A profile's windows cannot be identified afterwards.** Every Chrome window
+shares one process — pid 2306 for all seven here — and carries the page title
+with no profile marker. Nothing on screen says which window is the office one.
+
+**`open -na --profile-directory` accumulates.** Called for a profile that
+already had a window, it opened a fifth rather than focusing the fourth, so
+repeating the command would pile up windows.
+
+So Jarvis diffs Chrome's own window ids across a launch and remembers which id
+belongs to which profile, then raises that id directly next time. Verified: the
+first call opened a window, the second and third raised it with no accumulation.
+A remembered window that has since been closed falls back to launching.
+
 ### Looking at the screen
 
 "See this request, is it correct?" photographs **only the frontmost window** and

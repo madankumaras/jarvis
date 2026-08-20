@@ -92,6 +92,15 @@ def _person_params(m: re.Match[str]) -> dict:
     return {"person": m.group("person").strip()}
 
 
+def _profile_params(m: re.Match[str]) -> dict:
+    """The words between the verb and "chrome"/"browser", which name a profile.
+
+    Empty for a bare "open chrome" -- that is a plain app launch, so the router
+    hands it back rather than guessing at a profile.
+    """
+    return {"profile": (m.group("profile") or "").strip()}
+
+
 def _app_params(m: re.Match[str]) -> dict:
     """The app or window name, from whichever alternative matched.
 
@@ -298,6 +307,25 @@ INTENTS: list[Intent] = [
             re.I,
         ),
         extract=_channel_params,
+    ),
+    Intent(
+        name="chrome_profile",
+        method="__local__",
+        # "open office chrome", "bring the office browser front", "switch to my
+        # personal chrome", "open work browser".
+        #
+        # Before focus_window and open_app, both of which would resolve "office
+        # chrome" to the Google Chrome application and launch whichever profile
+        # happens to be default -- the office one is the account signed in to
+        # the Shopify stores, so the wrong profile is a wasted trip.
+        pattern=re.compile(
+            r"\b(?:open|launch|start|bring(?:\s+up)?|switch\s+to|go\s+to|"
+            r"focus(?:\s+on)?|raise)\s+"
+            r"(?:the\s+|my\s+)?(?P<profile>[a-z0-9 ]{0,20}?)\s*"
+            r"\b(?:chrome|browser)\b",
+            re.I,
+        ),
+        extract=_profile_params,
     ),
     Intent(
         name="minimise_window",

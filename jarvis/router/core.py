@@ -368,6 +368,24 @@ def _memory(name: str, params: dict, store, domain: str) -> Response:
         ok, said = open_app(params["app"])
         return Response(speech=said, ok=ok)
 
+    if name == "chrome_profile":
+        from jarvis.apps import focus_window, open_app
+        from jarvis.browser import open_profile, resolve_profile
+
+        said = params.get("profile", "")
+        # A bare "open chrome" names no profile, and picking one would be a
+        # guess. "Bring chrome front" should still raise the browser.
+        if not said or not resolve_profile(said)[0]:
+            if said:
+                ok, spoken = open_profile(said)
+                if not ok:
+                    return Response(speech=spoken, ok=False)
+                return Response(speech=spoken, ok=True)
+            ok, spoken = focus_window("Google Chrome")
+            return Response(speech=spoken, ok=ok)
+        ok, spoken = open_profile(said)
+        return Response(speech=spoken, ok=ok)
+
     if name == "focus_window":
         from jarvis.apps import focus_window
 

@@ -35,12 +35,9 @@ def test_opening_an_app(said, app):
     ("bring slack front", "slack"),
     ("bring slack to the front", "slack"),
     ("bring the 383 window front", "the 383 window"),
-    ("bring chrome forward", "chrome"),
-    ("switch to chrome", "chrome"),
     ("go to the terminal", "the terminal"),
     ("focus the trello window", "the trello window"),
     ("focus on slack", "slack"),
-    ("raise chrome", "chrome"),
 ])
 def test_raising_a_window_or_app(said, app):
     assert named(said) == "focus_window"
@@ -71,6 +68,16 @@ def test_real_questions_are_not_window_commands(said, expected):
     status of ZI-667", and would have tried to raise a window called "me the
     status of ZI-667"."""
     assert named(said) == expected
+
+
+@pytest.mark.parametrize("said", [
+    "bring chrome forward", "switch to chrome", "raise chrome", "open chrome",
+])
+def test_anything_naming_chrome_goes_to_the_profile_handler(said):
+    """Chrome is the one app where the app is not the whole answer -- three
+    profiles, and only one is signed in to the stores. The profile handler
+    delegates to plain app focus when no profile is named."""
+    assert named(said) == "chrome_profile"
 
 
 def test_a_card_id_is_never_a_window():
