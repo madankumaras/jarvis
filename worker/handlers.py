@@ -723,6 +723,24 @@ def _zi_ids() -> list[str]:
     return sorted(ids)
 
 
+def _look(path: str, question: str = "", window: str = "") -> dict[str, Any]:
+    """Answer a question about a captured window.
+
+    Imported flat and lazily, like `qa_labels` above: main.py runs
+    worker/main.py as a script, so this directory is sys.path[0] and there is no
+    `worker` package to import from inside the worker process.
+    """
+    from vision import look
+
+    return look(path, question=question, window=window)
+
+
+def _read_doc(ref: str, kind: str, question: str = "", name: str = "") -> dict[str, Any]:
+    from vision import read_doc
+
+    return read_doc(ref, kind, question=question, name=name)
+
+
 HANDLERS = {
     "card_status": card_status,
     "resolve_person": resolve_person,
@@ -743,4 +761,6 @@ HANDLERS = {
     "dev_status": dev_status,
     "customer_issues": customer_issues,
     "vocab": vocab,
+    "look": _look,
+    "read_doc": _read_doc,
 }

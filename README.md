@@ -103,6 +103,8 @@ No microphone handy? The same pipeline works typed:
 | "what is the testing plan for that" | the generated test cases for that ticket |
 | "open slack" / "launch vs code" | launches the app |
 | "post in qa-team saying ..." | read back, waits for "ok" |
+| "see this request, is it correct" | reads the window in front and **judges** it |
+| "go through this doc and ..." | reads the actual file or page, not a picture of it |
 | anything else | handed off, summarised, and read back to you |
 
 Jarvis also speaks unprompted: due reminders, new Zendesk issues, cards added
@@ -119,6 +121,56 @@ JARVIS_TIER3_ALLOW=all                                # bypass all checks
 
 `all` lets a misheard sentence modify anything in the target repo, unattended.
 That is why it is opt-in.
+
+### Looking at the screen
+
+"See this request, is it correct?" photographs **only the frontmost window** and
+answers. Never the whole screen: the question is about one window, and capturing
+the desktop would also send whatever Slack thread or terminal is behind it. The
+screenshot is deleted as soon as the question is answered.
+
+Needs Screen Recording permission (System Settings → Privacy & Security).
+Without it macOS quietly returns a picture of the wallpaper rather than failing.
+Accessibility is **not** needed — window geometry comes from CoreGraphics.
+
+Two things about this were measured rather than assumed, and both were wrong at
+first guess:
+
+**Asking is not judging.** On a rate request carrying `totalPackageCount: 2`
+beside a single package line item, the plain prompt described the screen
+accurately and called it correct **three times out of three**. A prompt that
+says to cross-check counts against entries present named the wrong field **three
+out of three**. Same model, same screenshot. So a question containing "correct",
+"wrong", "check", "verify" and the like switches to judging; "what's on my
+screen" still gets a description.
+
+**Screens get Sonnet, documents get Haiku.** On that same screenshot Haiku
+missed the mismatch and answered that the dimensions "seem quite large" —
+plausible, confident, wrong. Reading small text off pixels is where the cheap
+model fails. Document text arrives exact rather than inferred, so there is
+nothing to misread and Haiku is fine.
+
+```bash
+JARVIS_VISION_MODEL=claude-opus-5   # screens
+JARVIS_DOC_MODEL=claude-sonnet-4-6  # documents
+```
+
+### Reading a document
+
+"Go through this doc" asks the frontmost app what it has open and reads the real
+file or URL — whole, exact, and scrollable, unlike a photograph of one visible
+page. PDFs go through `pypdf`, Word and RTF through `textutil`, web pages
+through tag-stripping. An app that will not name its file falls back to looking
+at the screen, and says so.
+
+A document noun is required, because `go through that card` and `go through the
+doc` are otherwise the same sentence — the first is a Trello lookup.
+
+Non-text files are identified by **magic bytes**, not extension or character
+statistics. That last one was a failed attempt: this PDF's first 4000 bytes are
+its XMP metadata header — 47% letters, 22% spaces, no control characters, no
+replacement characters, statistically identical to prose. Its first four bytes
+are `%PDF`.
 
 ### When a job hits a problem
 

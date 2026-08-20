@@ -147,6 +147,13 @@ def _handle(
     if intent.method == "__local__":
         return _memory(intent.name, params, store, domain)
 
+    # Seeing happens here and answering happens in the worker: the screen and
+    # the frontmost app belong to this machine, the API key belongs to the repo.
+    if intent.method == "__screen__":
+        return _look_at_screen(params.get("question", ""), worker, available)
+    if intent.method == "__doc__":
+        return _read_document(params.get("question", ""), worker, available)
+
     if intent.method not in available:
         return _tier3(result.text, tier3)
 
@@ -213,6 +220,76 @@ def _flow_context(conversation: Conversation, domain: str) -> dict:
         "release": conversation.last_release,
         "domain": domain,
     }
+
+
+def _from_payload(payload, fallback: str) -> Response:
+    if not isinstance(payload, dict):
+        return Response(speech=fallback, detail="non-dict payload", ok=False)
+    return Response(
+        speech=payload.get("speech") or fallback,
+        detail=payload.get("detail", ""),
+        tier=2,
+        ok=bool(payload.get("ok", True)),
+    )
+
+
+def _look_at_screen(question: str, worker: Worker, available) -> Response:
+    """Photograph the frontmost window and answer a question about it."""
+    if "look" not in available:
+        return Response(speech="This project can't look at the screen.", ok=False)
+    from jarvis.eyes import window as eyes
+
+    try:
+        path, win = eyes.look()
+    except RuntimeError as exc:
+        return Response(speech=str(exc), ok=False)
+
+    try:
+        payload = worker.call("look", path=path, question=question, window=win.describe())
+    except RpcError as exc:
+        return Response(speech="I took the screenshot but couldn't read it.",
+                        detail=str(exc), ok=False)
+    return _from_payload(payload, "I couldn't make anything out on that screen.")
+
+
+def _read_document(question: str, worker: Worker, available) -> Response:
+    """Read the document open in front, falling back to looking at it.
+
+    An app that will not name its open file leaves only the picture, and a
+    picture of the visible page is a worse answer than the file but a much
+    better one than "I can't".
+    """
+    if "read_doc" not in available:
+        return Response(speech="This project can't read documents.", ok=False)
+    from jarvis.eyes import document as docs
+    from jarvis.eyes import window as eyes
+
+    win = eyes.frontmost()
+    if win is None:
+        return Response(speech="I can't see any window in front right now.", ok=False)
+
+    doc = docs.frontmost(win.app, win.title)
+    if doc is None or not doc.readable:
+        named = f" I can only see {doc.describe()}." if doc else ""
+        looked = _look_at_screen(question, worker, available)
+        if looked.ok:
+            return Response(
+                speech=f"{win.app} won't tell me the file, so I read the screen instead. "
+                       + looked.speech,
+                detail=looked.detail, tier=2,
+            )
+        return Response(
+            speech=f"I can't get the document out of {win.app}.{named}", ok=False,
+        )
+
+    try:
+        payload = worker.call(
+            "read_doc", ref=doc.ref, kind=doc.kind,
+            question=question, name=doc.describe(),
+        )
+    except RpcError as exc:
+        return Response(speech=f"I couldn't read {doc.describe()}.", detail=str(exc), ok=False)
+    return _from_payload(payload, f"I read {doc.describe()} but couldn't answer that.")
 
 
 def _which_card(worker: Worker) -> Response:

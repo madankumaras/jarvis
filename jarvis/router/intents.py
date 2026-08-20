@@ -77,6 +77,13 @@ def _dm_params(m: re.Match[str]) -> dict:
     return {"person": m.group("person").strip(), "text": m.group("body").strip()}
 
 
+def _asked_params(m: re.Match[str]) -> dict:
+    """The whole sentence is the question. "Is this correct?" carries no
+    information without the words around it, and the screen or document being
+    asked about is supplied separately."""
+    return {"question": m.string.strip()}
+
+
 def _body_params(m: re.Match[str]) -> dict:
     return {"text": m.group("body").strip()}
 
@@ -165,6 +172,42 @@ INTENTS: list[Intent] = [
             re.I,
         ),
         extract=_no_params,
+    ),
+    Intent(
+        name="read_document",
+        method="__doc__",
+        # "go through this doc and tell me...", "read the PDF", "summarise this
+        # page". Requires a document noun: "go through that card" is a Trello
+        # lookup, not a file, and the two phrasings are otherwise identical.
+        pattern=re.compile(
+            r"\b(?:go(?:ing)?\s+through|read|check|summari[sz]e|look\s+at|"
+            r"walk\s+through)\b[^.?!]{0,24}?"
+            r"\b(?:doc|docs|document|pdf|file|page|spec|sheet|readme|"
+            r"guide|report|wiki)\b",
+            re.I,
+        ),
+        extract=_asked_params,
+    ),
+    Intent(
+        name="look_at_screen",
+        method="__screen__",
+        # "look at this", "see this", "what's on my screen", "is this correct".
+        # Before the read intents: "see this request going for that card" names
+        # a card and would otherwise be answered from Trello, when what was
+        # asked about is the request on screen. After read_document so an
+        # explicit "look at this doc" reads the file rather than photographing
+        # one visible page of it.
+        pattern=re.compile(
+            r"\b(?:look|looking)\s+at\s+(?:this|that|my\s+screen|the\s+screen)\b"
+            r"|\btake\s+a\s+look\b"
+            r"|\b(?:see|check|read)\s+(?:this|what'?s\s+on)\b"
+            r"|\bon\s+(?:my|the)\s+screen\b"
+            r"|\bwhat\s+am\s+i\s+looking\s+at\b"
+            r"|\bis\s+th(?:is|at)\s+(?:one\s+)?(?:correct|right|ok|okay|fine|wrong)\b"
+            r"|\bwhat\s+do\s+you\s+(?:see|think\s+of\s+this)\b",
+            re.I,
+        ),
+        extract=_asked_params,
     ),
     Intent(
         name="remind_me",
