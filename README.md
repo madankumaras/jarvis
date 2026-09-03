@@ -106,6 +106,7 @@ No microphone handy? The same pipeline works typed:
 | "bring the 383 window front" | raises **that window**, not just the app |
 | "minimise this" | sends the front window to the Dock |
 | "post in qa-team saying ..." | read back, waits for "ok" |
+| "open the ajex store" | opens it in the office profile — or focuses the tab already showing it |
 | "see this request, is it correct" | reads the window in front and **judges** it |
 | "go through this doc and ..." | reads the actual file or page, not a picture of it |
 | anything else | handed off, summarised, and read back to you |
@@ -198,10 +199,21 @@ with no profile marker. Nothing on screen says which window is the office one.
 already had a window, it opened a fifth rather than focusing the fourth, so
 repeating the command would pile up windows.
 
-So Jarvis diffs Chrome's own window ids across a launch and remembers which id
-belongs to which profile, then raises that id directly next time. Verified: the
-first call opened a window, the second and third raised it with no accumulation.
-A remembered window that has since been closed falls back to launching.
+And `-n` asks macOS for a **new instance** — used repeatedly against a running
+Chrome it restarted the browser, taking three windows of open tabs with it.
+
+So everything goes through the running instance wherever it can. Launching a
+profile diffs Chrome's own window ids across the launch and remembers which id
+belongs to which profile, so the next call raises that id directly. Opening a
+page first looks for a tab already showing it and focuses that; failing that,
+the page is added as a tab to the profile's own window. `open -na` is left for
+the one case that needs it — a profile with no window at all.
+
+Verified: 3 windows, "bring office chrome front" raised the existing 31-tab
+office window, "open the moody store" added one tab to *that* window, and
+saying it again focused the tab with no change at all. The tab needle drops the
+query string, because Shopify appends an `appLoadId` to store URLs and matching
+the whole thing would never hit an open tab.
 
 ### Looking at the screen
 

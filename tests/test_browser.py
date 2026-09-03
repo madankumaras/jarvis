@@ -346,7 +346,8 @@ def test_an_ambiguous_name_returns_every_match(slugs):
 
 
 def test_an_unknown_store_is_reported_with_what_to_do(chrome, slugs, monkeypatch):
-    monkeypatch.setattr(browser, "open_url", lambda url, d: True)
+    monkeypatch.setattr(browser, "focus_tab", lambda needle, prefer="": False)
+    monkeypatch.setattr(browser, "open_url", lambda url, d, window="": True)
     ok, spoken = browser.open_page("banana store")
     assert ok is False
     assert "history" in spoken
@@ -355,10 +356,11 @@ def test_an_unknown_store_is_reported_with_what_to_do(chrome, slugs, monkeypatch
 def test_a_store_opens_in_the_office_profile_by_default(chrome, slugs, monkeypatch):
     """The office account is the one signed in to the stores, so anything
     work-shaped belongs there without having to say so."""
+    monkeypatch.setattr(browser, "focus_tab", lambda needle, prefer="": False)
     (chrome / "profiles.yaml").write_text("office: someone@company.com\n")
     opened = {}
     monkeypatch.setattr(browser, "open_url",
-                        lambda url, d: opened.update(url=url, directory=d) or True)
+                        lambda url, d, window="": opened.update(url=url, directory=d) or True)
     ok, spoken = browser.open_page("the moody store")
     assert ok is True
     assert opened["directory"] == "Default"
@@ -367,18 +369,20 @@ def test_a_store_opens_in_the_office_profile_by_default(chrome, slugs, monkeypat
 
 
 def test_an_explicit_profile_wins(chrome, slugs, monkeypatch):
+    monkeypatch.setattr(browser, "focus_tab", lambda needle, prefer="": False)
     (chrome / "profiles.yaml").write_text(
         "office: someone@company.com\npersonal: first@gmail.com\n"
     )
     opened = {}
     monkeypatch.setattr(browser, "open_url",
-                        lambda url, d: opened.update(directory=d) or True)
+                        lambda url, d, window="": opened.update(directory=d) or True)
     browser.open_page("the moody store", "personal")
     assert opened["directory"] == "Profile 5"
 
 
 def test_ambiguity_is_said_out_loud(chrome, slugs, monkeypatch):
-    monkeypatch.setattr(browser, "open_url", lambda url, d: True)
+    monkeypatch.setattr(browser, "focus_tab", lambda needle, prefer="": False)
+    monkeypatch.setattr(browser, "open_url", lambda url, d, window="": True)
     ok, spoken = browser.open_page("ajex store")
     assert ok is True
     assert "ajexautomation" in spoken
@@ -386,20 +390,22 @@ def test_ambiguity_is_said_out_loud(chrome, slugs, monkeypatch):
 
 
 def test_a_named_url_beats_a_store_search(chrome, monkeypatch):
+    monkeypatch.setattr(browser, "focus_tab", lambda needle, prefer="": False)
     (chrome / "urls.yaml").write_text("partner dashboard: https://partners.shopify.com\n")
     monkeypatch.setattr(browser, "URLS_CONFIG", str(chrome / "urls.yaml"))
     opened = {}
     monkeypatch.setattr(browser, "open_url",
-                        lambda url, d: opened.update(url=url) or True)
+                        lambda url, d, window="": opened.update(url=url) or True)
     ok, spoken = browser.open_page("the partner dashboard")
     assert ok is True
     assert opened["url"] == "https://partners.shopify.com"
 
 
 def test_a_bare_url_is_opened_as_given(chrome, monkeypatch):
+    monkeypatch.setattr(browser, "focus_tab", lambda needle, prefer="": False)
     opened = {}
     monkeypatch.setattr(browser, "open_url",
-                        lambda url, d: opened.update(url=url) or True)
+                        lambda url, d, window="": opened.update(url=url) or True)
     ok, _ = browser.open_page("https://admin.shopify.com/store/x/orders")
     assert ok is True
     assert opened["url"] == "https://admin.shopify.com/store/x/orders"
@@ -442,3 +448,110 @@ def test_a_page_routes_to_the_page_handler(said, page, profile):
 def test_apps_and_profiles_are_not_read_as_pages(said, expected):
     """The phrase has to end in a page noun, or "open slack" becomes a page."""
     assert named(said) == expected
+
+
+# --- tabs accumulate the same way windows did ---------------------------
+
+def test_an_already_open_page_focuses_its_tab(chrome, slugs, monkeypatch):
+    """Measured: "open the moody store" twice took the tab count from 80 to
+    81. The window cache stops that a level up; this stops it a level down."""
+    (chrome / "profiles.yaml").write_text("office: someone@company.com\n")
+    monkeypatch.setattr(browser, "focus_tab", lambda needle, prefer="": True)
+    opened = []
+    monkeypatch.setattr(browser, "open_url",
+                        lambda url, d, window="": opened.append(url) or True)
+
+    ok, spoken = browser.open_page("the moody store")
+    assert ok is True
+    assert "already open" in spoken
+    assert opened == [], "should not have opened anything"
+
+
+def test_a_page_that_is_not_open_is_opened(chrome, slugs, monkeypatch):
+    (chrome / "profiles.yaml").write_text("office: someone@company.com\n")
+    monkeypatch.setattr(browser, "focus_tab", lambda needle, prefer="": False)
+    opened = []
+    monkeypatch.setattr(browser, "open_url",
+                        lambda url, d, window="": opened.append(url) or True)
+
+    ok, spoken = browser.open_page("the moody store")
+    assert ok is True and "Opening" in spoken
+    assert opened == ["https://admin.shopify.com/store/qa-moody-store"]
+
+
+def test_the_tab_needle_drops_the_query_string():
+    """Shopify appends an appLoadId to store URLs, so matching the whole thing
+    would never hit an open tab."""
+    assert browser._needle(
+        "https://admin.shopify.com/store/x/apps/mcsl-qa?appLoadId=d708db3f"
+    ) == "admin.shopify.com/store/x/apps/mcsl-qa"
+
+
+@pytest.mark.parametrize("url,expected", [
+    ("https://a.com/b/", "a.com/b"),
+    ("http://a.com/b#frag", "a.com/b"),
+    ("https://a.com", "a.com"),
+])
+def test_needle_normalisation(url, expected):
+    assert browser._needle(url) == expected
+
+
+@pytest.mark.parametrize("bad", ['has"quote', "has\\backslash", ""])
+def test_a_needle_that_could_break_the_script_is_refused(bad):
+    assert browser.focus_tab(bad) is False
+
+
+# --- adding a tab beats asking for a new instance -----------------------
+
+def test_a_known_window_gets_a_new_tab_not_a_new_instance(monkeypatch):
+    """`open -na` asks macOS for a new instance; used repeatedly against a
+    running Chrome it restarted the browser and took three windows of tabs
+    with it. Adding a tab touches only the running instance."""
+    monkeypatch.setattr(browser, "window_ids", lambda: {"42"})
+    monkeypatch.setattr(browser, "new_tab", lambda wid, url: wid == "42")
+    launched = []
+    monkeypatch.setattr(browser.subprocess, "run", lambda *a, **k: launched.append(a))
+
+    assert browser.open_url("https://x.com/y", "Default", "42") is True
+    assert launched == [], "should not have asked for a new instance"
+
+
+def test_no_window_falls_back_to_a_new_instance(monkeypatch):
+    """The one case that genuinely needs it: a profile with no window at all."""
+    monkeypatch.setattr(browser, "window_ids", lambda: set())
+    launched = []
+    monkeypatch.setattr(browser.subprocess, "run", lambda *a, **k: launched.append(a[0]))
+
+    assert browser.open_url("https://x.com/y", "Default", "") is True
+    assert any("-na" in cmd for cmd in launched)
+
+
+def test_a_dead_window_id_falls_back_to_a_new_instance(monkeypatch):
+    monkeypatch.setattr(browser, "window_ids", lambda: {"99"})
+    monkeypatch.setattr(browser, "new_tab", lambda wid, url: pytest.fail("stale id used"))
+    launched = []
+    monkeypatch.setattr(browser.subprocess, "run", lambda *a, **k: launched.append(a[0]))
+
+    assert browser.open_url("https://x.com/y", "Default", "42") is True
+    assert launched
+
+
+@pytest.mark.parametrize("wid,url", [
+    ("abc", "https://x.com"), ("42", "javascript:alert(1)"),
+    ("42", 'https://x.com/"quote'), ("", "https://x.com"),
+])
+def test_new_tab_refuses_anything_unsafe(wid, url):
+    assert browser.new_tab(wid, url) is False
+
+
+# --- how a store is named out loud --------------------------------------
+
+@pytest.mark.parametrize("slug,expected", [
+    ("qa-moody-store", "the qa-moody-store"),
+    ("ajexautomation", "the ajexautomation store"),
+    ("indiapoststore2", "the indiapoststore2 store"),
+])
+def test_a_slug_that_already_says_store_does_not_get_another(slug, expected):
+    """"the qa-moody-store store" is what appending it unconditionally gives,
+    and it is read aloud exactly that way."""
+    assert browser.store_name(slug) == expected

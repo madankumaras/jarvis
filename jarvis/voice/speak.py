@@ -86,6 +86,15 @@ _CODE_EXT = re.compile(
 # is what identifies the store to a person.
 _RANDOM_TAIL = re.compile(r"(?<=[a-z]{3})-(?=[a-z0-9]{6,12}\b)(?=[a-z0-9]*\d)[a-z0-9]+\b")
 
+# A long run of digits is an identifier, and `say` reads it as one enormous
+# cardinal: 548419010 becomes "five hundred forty-eight million four hundred
+# nineteen thousand and ten". Seven digits is the threshold because everything
+# shorter is a real quantity -- 120000 characters, 1470 pixels, release 385 --
+# and those are better read as numbers.
+_LONG_DIGITS = re.compile(r"(?<![\d.])(\d{7,})(?![\d.])")
+# "1470x801" is a size, not a word. Said as "by", it is a sentence.
+_DIMENSIONS = re.compile(r"(?<=\d)\s*[x×]\s*(?=\d)", re.I)
+
 
 def _expand_identifiers(text: str) -> str:
     """Make code-shaped tokens pronounceable.
@@ -131,6 +140,8 @@ def speakable(text: str) -> str:
     # store slug and read ".md" as "dot m d".
     out = _RANDOM_TAIL.sub("", out)
     out = _CODE_EXT.sub("", out)
+    out = _DIMENSIONS.sub(" by ", out)
+    out = _LONG_DIGITS.sub(lambda m: " ".join(m.group(1)), out)
     out = _expand_identifiers(out)
     return re.sub(r"\s+", " ", out).strip(" ,.;:-")
 

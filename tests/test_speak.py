@@ -355,3 +355,38 @@ def test_a_json_field_becomes_words():
     out = speakable("totalPackageCount is 2 but requestedPackageLineItems has one entry")
     assert "total Package Count" in out
     assert "requested Package Line Items" in out
+
+
+# --- numbers ---------------------------------------------------------------
+
+@pytest.mark.parametrize("said,expected", [
+    ("window 548419010", "5 4 8 4 1 9 0 1 0"),
+    ("app id 384068550657", "3 8 4 0 6 8 5 5 0 6 5 7"),
+])
+def test_a_long_identifier_is_read_as_digits(said, expected):
+    """`say` reads 548419010 as "five hundred forty-eight million four hundred
+    nineteen thousand and ten" -- a wall of number words where an id was
+    meant."""
+    assert expected in speakable(said)
+
+
+@pytest.mark.parametrize("said,expected", [
+    ("MCSL 385 has 16 cards", "385"),
+    ("2 packages", "2"),
+    ("120000 characters", "120000"),
+    ("at 16:00", "16:00"),
+    ("0.43 score", "0.43"),
+    ("1.5 KG", "1.5"),
+])
+def test_real_quantities_are_left_as_numbers(said, expected):
+    """Six digits and under are quantities, not identifiers, and are better
+    read as numbers."""
+    assert expected in speakable(said)
+
+
+@pytest.mark.parametrize("said,expected", [
+    ("1470x801 pixels", "1470 by 801"),
+    ("30x20x10 CM", "30 by 20 by 10"),
+])
+def test_dimensions_are_read_as_by(said, expected):
+    assert expected in speakable(said)

@@ -11,15 +11,23 @@ shares one process (pid 2306 for all of them here) and its title is the page
 title with no profile marker. So there is no way to look at the screen and say
 which window is the office one.
 
-**`open -na --profile-directory` accumulates.** Called for a profile that
-already has a window, it opened a fifth window rather than focusing the fourth.
-Repeating "open office chrome" would pile up windows.
+**`open -na --profile-directory` accumulates, and worse.** Called for a profile
+that already has a window it opened a fifth rather than focusing the fourth, so
+repeating "open office chrome" piled up windows. Tabs did the same thing one
+level down: "open the moody store" twice took the tab count from 80 to 81. And
+`-n` asks macOS for a *new instance* -- used repeatedly against a running
+Chrome it restarted the browser, taking three windows of open tabs with it.
 
-Together those force the design: when Jarvis launches a profile it diffs
-Chrome's own window ids across the launch, and remembers which id belongs to
-which profile. Next time it raises that id directly. Chrome's window ids are
-stable and `first window whose id is N` is addressable, which is what makes
-raise-instead-of-relaunch possible at all.
+Together those force the design. Everything goes through the running instance
+wherever possible:
+
+* Launching a profile diffs Chrome's own window ids across the launch and
+  remembers which id belongs to which profile, so the next call raises that id
+  with `first window whose id is N` instead of relaunching.
+* Opening a page first looks for a tab already showing it and focuses that.
+* Failing that, the page is added as a tab to the profile's own window.
+* `open -na` is left for the one case that needs it: a profile with no window
+  at all.
 
 The label-to-email mapping lives in ~/.jarvis/chrome_profiles.yaml, never in
 this repository -- the repository is public and those are real addresses.
@@ -433,10 +441,90 @@ def resolve_store(phrase: str, directory: str = "Default") -> list[str]:
     return [s for s in slugs if wanted in re.sub(r"[^a-z0-9]+", "", s.lower())]
 
 
-def open_url(url: str, directory: str) -> bool:
-    """Open a URL in a specific profile."""
+def focus_tab(needle: str, prefer_window: str = "") -> bool:
+    """Focus an already-open tab whose URL contains `needle`. True if found.
+
+    Without this, "open the moody store" twice opened two tabs -- tab count
+    went 80 to 81 -- exactly the accumulation the window cache exists to stop,
+    one level down.
+
+    The profile's own window is searched first when it is known. A tab is not
+    labelled with its profile any more than a window is, but a store page is
+    only signed in to one account, so a match anywhere is the right tab.
+    """
+    if not needle or '"' in needle or "\\" in needle:
+        return False
+    first = ""
+    if re.fullmatch(r"\d{1,20}", prefer_window or ""):
+        # Try the profile's own window before the rest, so a store open in two
+        # profiles focuses the one that was asked for.
+        first = f'''
+          try
+            set w to (first window whose id is {prefer_window})
+            repeat with i from 1 to (count of tabs of w)
+              if (URL of tab i of w) contains "{needle}" then
+                set active tab index of w to i
+                set index of w to 1
+                activate
+                return "yes"
+              end if
+            end repeat
+          end try'''
+    out = _osascript(
+        f'''tell application "Google Chrome"{first}
+          repeat with w in windows
+            repeat with i from 1 to (count of tabs of w)
+              if (URL of tab i of w) contains "{needle}" then
+                set active tab index of w to i
+                set index of w to 1
+                activate
+                return "yes"
+              end if
+            end repeat
+          end repeat
+          return "no"
+        end tell''',
+        timeout=60,
+    )
+    return out == "yes"
+
+
+def new_tab(window_id: str, url: str) -> bool:
+    """Add a tab to an existing window. True if it worked.
+
+    Preferred over relaunching, and not only because it is faster. `open -na`
+    asks macOS for a *new instance*; used repeatedly against a running Chrome it
+    restarted the browser and took three windows of tabs with it. This route
+    touches the running instance only, and the tab lands in the right profile
+    because the window already belongs to that profile.
+    """
+    if not re.fullmatch(r"\d{1,20}", window_id or ""):
+        return False
+    if not re.match(r"^https?://", url or "") or '"' in url or "\\" in url:
+        return False
+    out = _osascript(
+        f'''tell application "Google Chrome"
+          set w to (first window whose id is {window_id})
+          make new tab at end of tabs of w with properties {{URL:"{url}"}}
+          set active tab index of w to (count of tabs of w)
+          set index of w to 1
+          activate
+          return "yes"
+        end tell'''
+    )
+    return out == "yes"
+
+
+def open_url(url: str, directory: str, window: str = "") -> bool:
+    """Open a URL in a specific profile.
+
+    Adds a tab to the profile's own window when one is known, and only asks
+    macOS for a new instance when the profile has no window at all.
+    """
     if not re.match(r"^https?://", url or ""):
         return False
+    if window and window in window_ids() and new_tab(window, url):
+        return True
     try:
         subprocess.run(
             ["open", "-na", "Google Chrome", "--args",
@@ -464,25 +552,61 @@ def open_page(phrase: str, profile: str = "") -> tuple[bool, str]:
     if not said:
         return False, "Which page should I open?"
 
+    window = _remembered().get(directory, "")
+
+    def reach(url: str, needle: str, what: str) -> tuple[bool, str]:
+        """Focus the tab if it is already open, otherwise open it."""
+        if focus_tab(needle, window):
+            return True, f"{what} is already open in {label} Chrome. Brought it to the front."
+        if open_url(url, directory, window):
+            return True, f"Opening {what} in {label} Chrome."
+        return False, f"Couldn't open {what}."
+
+    def sentence(text: str) -> str:
+        return text[:1].upper() + text[1:] if text else text
+
     known = named_urls()
     for name in sorted(known, key=len, reverse=True):
         if name in said.lower():
-            if open_url(known[name], directory):
-                return True, f"Opening {name} in {label} Chrome."
-            return False, f"Couldn't open {name}."
+            ok, spoken = reach(known[name], _needle(known[name]), f"the {name}")
+            return ok, sentence(spoken)
 
     if re.match(r"^https?://", said):
-        return (True, f"Opening that page in {label} Chrome.") if open_url(said, directory) \
-            else (False, "Couldn't open that page.")
+        ok, spoken = reach(said, _needle(said), "that page")
+        return ok, sentence(spoken)
 
     matches = resolve_store(said, directory)
     if not matches:
         return False, (f"I couldn't find a store matching {said}. "
                        "I look in Chrome's history, so open it once by hand first.")
     slug = matches[0]
-    if not open_url(f"https://{STORE_HOST}/store/{slug}", directory):
-        return False, f"Couldn't open the {slug} store."
-    if len(matches) > 1:
-        return True, (f"Opening {slug} in {label} Chrome. "
-                      f"There are {len(matches)} that match, say the full name for a different one.")
-    return True, f"Opening the {slug} store in {label} Chrome."
+    ok, spoken = reach(
+        f"https://{STORE_HOST}/store/{slug}",
+        f"{STORE_HOST}/store/{slug}",
+        store_name(slug),
+    )
+    if ok and len(matches) > 1:
+        spoken += f" There are {len(matches)} that match, say the full name for a different one."
+    return ok, sentence(spoken)
+
+
+def store_name(slug: str) -> str:
+    """How to refer to a store out loud.
+
+    "the qa-moody-store store" is what appending the word unconditionally
+    gives, and it is read aloud exactly that way.
+    """
+    if re.search(r"\bstores?\b", slug.replace("-", " "), re.I):
+        return f"the {slug}"
+    return f"the {slug} store"
+
+
+def _needle(url: str) -> str:
+    """The part of a URL that identifies the page, for matching open tabs.
+
+    Host and path only. The query string is dropped -- Shopify appends an
+    appLoadId to store URLs, so matching the whole thing would never hit an
+    open tab.
+    """
+    body = re.sub(r"^https?://", "", url or "").split("?")[0].split("#")[0]
+    return body.rstrip("/")
