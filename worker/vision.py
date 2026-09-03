@@ -35,15 +35,33 @@ _SPOKEN = (
 # Same model, same screenshot -- the instruction to judge rather than describe
 # was the entire difference.
 _JUDGE = (
-    "You are checking a QA engineer's screen and answering out loud.\n"
-    "Do not describe what you see -- judge it. Cross-check the values against "
-    "each other: counts against the number of entries actually present, totals "
-    "against the sum of their parts, units, and any figure repeated in two "
-    "places. If something does not add up, say exactly which field is wrong and "
-    "what it should be. If everything is consistent, say so plainly.\n"
-    "Answer in two or three short sentences of plain spoken English. No "
-    "markdown, no bullet points, no code blocks. Lead with the verdict."
+    "You are checking a QA engineer's work and answering OUT LOUD, so the reply "
+    "is heard once and cannot be re-read.\n"
+    "Check it properly: counts against the entries actually present, totals "
+    "against the sum of their parts, units, and any figure appearing twice.\n"
+    "Then report ONLY the verdict, in at most 45 words and at most three "
+    "sentences. Rules for the reply:\n"
+    "- Start with the verdict itself. No preamble, no 'working this out', no "
+    "restating the question.\n"
+    "- Do not show arithmetic and do not list the figures that were fine. Name a "
+    "number only when it IS the problem.\n"
+    "- Never contradict yourself: no 'wait', no 'actually', no 'that checks out' "
+    "followed by a reversal.\n"
+    "- If it is self-consistent but still suspicious, say what is suspicious and "
+    "that a human should confirm.\n"
+    "Plain spoken English. No markdown."
 )
+# Judging needs room, but the room goes into checking rather than into the
+# answer. Three measurements on one 43,000-character rate log:
+#   400 tokens, "judge it"           -> 0/3. Cut off mid-sentence, and one reply
+#                                       talked itself out of the finding.
+#   1200 tokens, "work it out first" -> 4/4 correct but 126 words, ~45 seconds
+#                                       of speech, opening with "Working this
+#                                       out before writing anything:" -- it
+#                                       showed the thinking it was told to do.
+#   1200 tokens, verdict-only rules  -> 4/4 correct at 44-53 words.
+# So the budget stays high and the output limit is stated in the prompt.
+JUDGE_TOKENS = 1200
 
 # "Is this right", "does this look correct", "anything wrong here", "check this".
 _CHECKING = re.compile(
@@ -53,9 +71,14 @@ _CHECKING = re.compile(
 )
 
 
+def judging(question: str) -> bool:
+    """Whether the question asks for a verdict rather than a description."""
+    return bool(_CHECKING.search(question or ""))
+
+
 def _screen_prompt(question: str) -> str:
     """Judge when asked whether something is right; describe when asked what."""
-    return _JUDGE if _CHECKING.search(question or "") else _SPOKEN
+    return _JUDGE if judging(question) else _SPOKEN
 
 
 def _api(task: str) -> tuple[Any, str] | None:
@@ -68,9 +91,16 @@ def _api(task: str) -> tuple[Any, str] | None:
     text off pixels is where the cheaper model fails, and a wrong answer to "is
     this correct?" is worse than no answer.
 
-    Documents keep Haiku: their text arrives exact rather than inferred from an
-    image, so there is nothing to misread, and it answered real support guides
-    correctly at a third of the cost.
+    Documents keep Haiku for *reading*: their text arrives exact rather than
+    inferred from an image, so there is nothing to misread, and it answered real
+    support guides correctly at a third of the cost.
+
+    Judging a document is a different job, and that reasoning did not cover it.
+    Asked whether a fuel surcharge in a 43,000-character rate log was right,
+    Haiku spotted the two FUEL entries but never landed the verdict in three
+    tries -- one answer talked itself out of the finding with "the math does
+    check out". So a question that asks for a verdict gets the stronger model
+    whatever it is looking at.
     """
     try:
         import config
@@ -78,13 +108,39 @@ def _api(task: str) -> tuple[Any, str] | None:
 
         if not config.ANTHROPIC_API_KEY:
             return None
-        default = config.CLAUDE_SONNET_MODEL if task == "screen" else config.CLAUDE_HAIKU_MODEL
+        strong = task == "screen" or task == "judge"
+        default = config.CLAUDE_SONNET_MODEL if strong else config.CLAUDE_HAIKU_MODEL
         model = os.environ.get(
             "JARVIS_VISION_MODEL" if task == "screen" else "JARVIS_DOC_MODEL", ""
         ).strip() or default
         return Anthropic(api_key=config.ANTHROPIC_API_KEY), model
     except Exception:
         return None
+
+
+# Below this width, dense text in a screenshot is not reliably legible. The
+# same rate request, same model, same prompt: rendered 1470 wide at 2x the
+# duplicate package line item was found 3 times out of 3; rendered 1100 wide at
+# 1x it was called correct 3 times out of 3. Resolution was the whole
+# difference, not the wording. A real `screencapture` on a Retina display is 2x,
+# so an ordinary window clears this comfortably -- it is a small or
+# low-resolution window that does not.
+MIN_JUDGE_WIDTH = 1200
+
+
+def png_width(path: str) -> int:
+    """Pixel width from the PNG header. No image library needed.
+
+    Bytes 16-20 of a PNG are the IHDR width, big-endian.
+    """
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(24)
+        if len(head) < 24 or head[:8] != b"\x89PNG\r\n\x1a\n":
+            return 0
+        return int.from_bytes(head[16:20], "big")
+    except OSError:
+        return 0
 
 
 def _say(client, model: str, blocks: list[dict], max_tokens: int = 400) -> str:
@@ -126,7 +182,13 @@ def look(path: str, question: str = "", window: str = "") -> dict[str, Any]:
             {"type": "image",
              "source": {"type": "base64", "media_type": "image/png", "data": data}},
             {"type": "text", "text": f"{where}{asked}\n\n{_screen_prompt(question)}"},
-        ])
+        ], max_tokens=JUDGE_TOKENS if judging(question) else 400)
+        # A verdict from a small screenshot is not trustworthy, and saying so is
+        # better than sounding certain: on a 1100px render the same question was
+        # answered "the request is correct" three times out of three.
+        if said and judging(question) and 0 < png_width(path) < MIN_JUDGE_WIDTH:
+            said += (" That window is small, so I may have misread it -- "
+                     "point me at the file if you have one.")
         return {"speech": said or "I could not make anything out on that screen.",
                 "detail": f"[looked at {window or path}]", "ok": bool(said)}
     except Exception as exc:
@@ -266,7 +328,8 @@ def read_doc(ref: str, kind: str, question: str = "", name: str = "") -> dict[st
                           "If it is a scan, ask me to look at the screen instead.",
                 "ok": False}
 
-    api = _api("doc")
+    verdict = judging(question)
+    api = _api("judge" if verdict else "doc")
     if api is None:
         return {"speech": "I cannot read documents without an API key.", "ok": False}
     client, model = api
@@ -277,8 +340,8 @@ def read_doc(ref: str, kind: str, question: str = "", name: str = "") -> dict[st
     try:
         said = _say(client, model, [{"type": "text", "text": (
             f"Document: {label}\n\n{clipped}\n\n"
-            f"---\nQuestion: {asked}\n\n{_SPOKEN}"
-        )}])
+            f"---\nQuestion: {asked}\n\n{_JUDGE if verdict else _SPOKEN}"
+        )}], max_tokens=JUDGE_TOKENS if verdict else 400)
         note = "" if len(text) <= MAX_DOC_CHARS else " That is from the first part of the document."
         return {"speech": (said or f"I read {label} but could not answer that.") + note,
                 "detail": f"[read {label}, {len(text)} characters]", "ok": bool(said)}

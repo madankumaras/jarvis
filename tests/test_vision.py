@@ -236,7 +236,7 @@ def test_the_judging_prompt_reaches_the_model(tmp_path, fake_config, monkeypatch
     monkeypatch.setattr(vision, "_say",
                         lambda c, m, blocks, max_tokens=400: seen.setdefault("t", blocks[-1]["text"]) or "x")
     vision.look(str(shot), question="is this request correct")
-    assert "judge it" in seen["t"]
+    assert "ONLY the verdict" in seen["t"]
 
 
 # --- telling text from bytes ---------------------------------------------
@@ -354,3 +354,105 @@ def test_a_textual_content_type_is_read(monkeypatch, ctype):
     text, problem = vision.extract("https://x/page", "url")
     assert problem == ""
     assert "hi" in text
+
+
+# --- judging a document, not just a screen -------------------------------
+
+def test_a_check_on_a_document_gets_the_stronger_model(fake_config, monkeypatch):
+    """Giving documents Haiku was reasoning about *reading* -- their text is
+    exact, so there is nothing to misread. Judging is a different job: asked
+    whether a fuel surcharge in a 43,000-character rate log was right, Haiku
+    spotted the two FUEL entries but never landed the verdict in three tries,
+    and one reply talked itself out of it with "the math does check out"."""
+    monkeypatch.delenv("JARVIS_DOC_MODEL", raising=False)
+    assert vision._api("judge")[1] == "claude-sonnet-4-6"
+    assert vision._api("doc")[1] == "claude-haiku-4-5"
+
+
+def test_a_document_check_uses_the_judging_prompt(tmp_path, fake_config, monkeypatch):
+    doc = tmp_path / "rate.log"
+    doc.write_text("CASE-05 totalNetCharge 505")
+    seen = {}
+
+    def spy(client, model, blocks, max_tokens=400):
+        seen["text"] = blocks[-1]["text"]
+        seen["tokens"] = max_tokens
+        return "The total is wrong."
+
+    monkeypatch.setattr(vision, "_say", spy)
+    vision.read_doc(str(doc), "file", question="is the fuel surcharge total correct")
+    assert "ONLY the verdict" in seen["text"]
+    assert seen["tokens"] == vision.JUDGE_TOKENS
+
+
+def test_reading_a_document_keeps_the_short_budget(tmp_path, fake_config, monkeypatch):
+    doc = tmp_path / "guide.md"
+    doc.write_text("A guide.")
+    seen = {}
+
+    def spy(client, model, blocks, max_tokens=400):
+        seen["tokens"] = max_tokens
+        seen["text"] = blocks[-1]["text"]
+        return "It is a guide."
+
+    monkeypatch.setattr(vision, "_say", spy)
+    vision.read_doc(str(doc), "file", question="what is this")
+    assert seen["tokens"] == 400
+    assert "ONLY the verdict" not in seen["text"]
+
+
+@pytest.mark.parametrize("question,expected", [
+    ("is the total correct", True),
+    ("check the fuel surcharge case", True),
+    ("any issue with this log", True),
+    ("what is this", False),
+    ("tell me what this document says", False),
+    ("summarise this", False),
+])
+def test_which_questions_ask_for_a_verdict(question, expected):
+    assert vision.judging(question) is expected
+
+
+# --- a small screenshot is not worth a confident verdict -----------------
+
+def test_png_width_is_read_from_the_header(tmp_path):
+    """Bytes 16-20 of a PNG are the IHDR width. No image library needed."""
+    png = tmp_path / "a.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8 + (1470).to_bytes(4, "big") + b"\x00" * 4)
+    assert vision.png_width(str(png)) == 1470
+
+
+@pytest.mark.parametrize("body", [b"not a png at all", b"\x89PNG", b""])
+def test_a_non_png_has_no_width(tmp_path, body):
+    f = tmp_path / "x.png"
+    f.write_bytes(body)
+    assert vision.png_width(str(f)) == 0
+
+
+def test_a_small_window_gets_a_caveat_on_a_verdict(tmp_path, fake_config, monkeypatch):
+    """Resolution was the whole difference, not the wording: the same request,
+    model and prompt found the duplicate package line item 3 times out of 3 at
+    1470px and called it correct 3 out of 3 at 1100px."""
+    shot = tmp_path / "s.png"
+    shot.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8 + (600).to_bytes(4, "big") + b"\x00" * 4)
+    monkeypatch.setattr(vision, "_say", lambda *a, **k: "The request is correct.")
+    out = vision.look(str(shot), question="is this correct")
+    assert "may have misread" in out["speech"]
+
+
+def test_a_full_size_window_gets_no_caveat(tmp_path, fake_config, monkeypatch):
+    shot = tmp_path / "s.png"
+    shot.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8 + (2940).to_bytes(4, "big") + b"\x00" * 4)
+    monkeypatch.setattr(vision, "_say", lambda *a, **k: "The request is correct.")
+    out = vision.look(str(shot), question="is this correct")
+    assert "may have misread" not in out["speech"]
+
+
+def test_a_description_never_gets_the_caveat(tmp_path, fake_config, monkeypatch):
+    """It only matters for a verdict. "What is on my screen" is answerable from
+    a small window."""
+    shot = tmp_path / "s.png"
+    shot.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8 + (600).to_bytes(4, "big") + b"\x00" * 4)
+    monkeypatch.setattr(vision, "_say", lambda *a, **k: "A browser window.")
+    out = vision.look(str(shot), question="what is on my screen")
+    assert "may have misread" not in out["speech"]

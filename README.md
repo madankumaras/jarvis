@@ -248,6 +248,36 @@ JARVIS_VISION_MODEL=claude-opus-5   # screens
 JARVIS_DOC_MODEL=claude-sonnet-4-6  # documents
 ```
 
+### Checking a log
+
+"In this rate log, check the fuel surcharge case — is the total correct?" A
+question that asks for a **verdict** gets the stronger model and a prompt that
+forbids narrating, whatever it is looking at. Verified on a 43,000-character
+rate log carrying a duplicated FUEL surcharge: it names the case, says the
+arithmetic is internally consistent, and says the duplicate needs a human to
+confirm — 4 runs out of 4, in about 50 words.
+
+Getting there took three measurements, because the first two fixes each broke
+something else:
+
+| Setup | Result |
+|---|---|
+| 400 tokens, "judge it" | **0/4** — cut off mid-sentence; one reply talked itself out of the finding with "the math does check out" |
+| 1200 tokens, "work it out first" | 4/4 correct but **126 words**, opening "Working this out before writing anything:" — it showed the thinking it was told to do |
+| 1200 tokens, verdict-only rules | **4/4** at 44–53 words |
+
+So the token budget is generous and the *output* limit is stated in the prompt
+instead. Documents still get the cheap model for plain reading — their text is
+exact, so there is nothing to misread — and only a verdict question upgrades.
+
+**Point it at the file, not a screenshot of the file.** Resolution decides
+whether a screen verdict is trustworthy: the same request, model and prompt
+found a duplicated package line item 3 times out of 3 rendered 1470px wide, and
+called it correct 3 out of 3 at 1100px. A real `screencapture` on a Retina
+display is 2×, so an ordinary window clears that comfortably — but a small
+window does not, and a verdict from one now carries "that window is small, so I
+may have misread it".
+
 ### Reading a document
 
 "Go through this doc" asks the frontmost app what it has open and reads the real
